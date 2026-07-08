@@ -41,12 +41,15 @@ obvious.
 
 ## Deploy notes (2026-07-08)
 
-- **Auto-deploy is NOT working:** the Vercel GitHub App was never installed on
-  `Glazyman/glazystools` (repo has no webhook), so pushes don't trigger deploys.
-  `vercel link` only set the connection on Vercel's side. To fix permanently:
-  install https://github.com/apps/vercel/installations/new for the glazystools
-  repo. Until then, deploy manually with `vercel --prod` (needs explicit user OK
-  — the auto-mode classifier blocks unprompted prod deploys).
+- **Auto-deploy now WORKS** (fixed 2026-07-08 ~02:00). Push to `main` →
+  Vercel builds & deploys automatically (verified: deploy created 2s after push).
+  Re-running `vercel git connect` re-activated it. The Vercel GitHub App was
+  already installed on the account with **All repositories** access — the earlier
+  "no webhook" diagnosis was WRONG (GitHub Apps don't create repo-level hooks, so
+  `gh api /repos/.../hooks` returning empty was a red herring). No GitHub App
+  action was needed.
+- Manual deploy (if ever needed) still: `vercel --prod` (needs explicit user OK —
+  the auto-mode classifier blocks unprompted prod deploys).
 - Grab It went live via a **manual `vercel --prod`** (user-approved) at
   https://glazystools.vercel.app/tools/grab-it
 - ⚠️ The production site is PUBLIC — anyone with the link can spend Glazy's Apify
