@@ -30,6 +30,16 @@ export type ScoredComment = ScrapedComment & {
   replyIdea?: string; // a draft reply that builds on it
 };
 
+// Cross-run analysis when combining multiple saved videos.
+export type CombinedAnalysis = {
+  overview: string; // the through-line across the videos
+  sharedThemes: string[]; // themes/questions that recur across videos
+  audiencePatterns: string[]; // what the audience consistently wants
+  topIdeas: string[]; // strongest ideas across the whole set
+  contentGaps: string[]; // gaps spanning the videos
+  nextMoves: string[]; // concrete next content that combines the insights
+};
+
 export type Analysis = {
   transcript: string;
   transcriptSource: "captions" | "video" | "unavailable";

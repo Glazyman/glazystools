@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Analysis, ScoredComment, ScrapedPost } from "@/lib/grab-it/types";
+import type {
+  Analysis,
+  CombinedAnalysis,
+  ScoredComment,
+  ScrapedPost,
+} from "@/lib/grab-it/types";
 import {
   deleteRun,
   getRun,
@@ -217,6 +222,53 @@ function SavedView({
   onOpen: (id: string) => void | Promise<void>;
   onDeleted: () => void;
 }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [combining, setCombining] = useState(false);
+  const [combined, setCombined] = useState<CombinedAnalysis | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function toggle(id: string) {
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  async function combine() {
+    setCombining(true);
+    setError(null);
+    setCombined(null);
+    try {
+      const full = await Promise.all([...selected].map((id) => getRun(id)));
+      const runs = full.map((r) => ({
+        author: r.post.author,
+        url: r.post.url,
+        summary: r.analysis.videoSummary,
+        transcript: r.analysis.transcript,
+        comments: r.analysis.scoredComments.map((c) => ({
+          author: c.author,
+          text: c.text,
+          likes: c.likes,
+          score: c.score,
+        })),
+      }));
+      const res = await fetch("/api/grab-it/combine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runs }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Combine failed.");
+      setCombined(data.combined);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Combine failed.");
+    } finally {
+      setCombining(false);
+    }
+  }
+
   if (loading) {
     return <p className="py-8 text-center text-sm text-subtle">Loading…</p>;
   }
@@ -229,21 +281,115 @@ function SavedView({
       </div>
     );
   }
+
   return (
-    <div className="space-y-2">
-      {items.map((r) => (
-        <SavedCard key={r.id} run={r} onOpen={onOpen} onDeleted={onDeleted} />
-      ))}
+    <div className="space-y-3">
+      <p className="text-xs text-muted">
+        Tick two or more runs to cross-reference them into one combined analysis.
+      </p>
+
+      {selected.size >= 1 && (
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 rounded-lg border border-border bg-elevated px-3 py-2 text-xs">
+          <span className="text-muted">{selected.size} selected</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-subtle hover:text-fg"
+            >
+              Clear
+            </button>
+            <button
+              onClick={combine}
+              disabled={selected.size < 2 || combining}
+              className="rounded-md bg-accent px-3 py-1.5 font-medium text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {combining
+                ? "Analyzing…"
+                : `Combine & analyze (${selected.size})`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-red-300">{error}</p>}
+
+      {combined && (
+        <CombinedResult combined={combined} onClose={() => setCombined(null)} />
+      )}
+
+      <div className="space-y-2">
+        {items.map((r) => (
+          <SavedCard
+            key={r.id}
+            run={r}
+            selected={selected.has(r.id)}
+            onToggle={() => toggle(r.id)}
+            onOpen={onOpen}
+            onDeleted={onDeleted}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CombinedResult({
+  combined,
+  onClose,
+}: {
+  combined: CombinedAnalysis;
+  onClose: () => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-xl border border-accent/40 bg-accent/5 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-sm font-semibold text-fg">
+          🔀 Combined analysis
+        </h3>
+        <button
+          onClick={onClose}
+          className="shrink-0 text-xs text-subtle hover:text-fg"
+        >
+          ✕ close
+        </button>
+      </div>
+      <p className="text-sm leading-relaxed text-fg">{combined.overview}</p>
+      <Collapsible
+        title="🎯 Top ideas across your videos"
+        count={combined.topIdeas.length}
+        defaultOpen
+      >
+        <BulletList items={combined.topIdeas} />
+      </Collapsible>
+      <Collapsible title="Next moves" count={combined.nextMoves.length}>
+        <BulletList items={combined.nextMoves} />
+      </Collapsible>
+      <Collapsible title="Shared themes" count={combined.sharedThemes.length}>
+        <BulletList items={combined.sharedThemes} />
+      </Collapsible>
+      <Collapsible
+        title="Audience patterns"
+        count={combined.audiencePatterns.length}
+      >
+        <BulletList items={combined.audiencePatterns} />
+      </Collapsible>
+      <Collapsible title="Content gaps" count={combined.contentGaps.length}>
+        <BulletList items={combined.contentGaps} />
+      </Collapsible>
     </div>
   );
 }
 
 function SavedCard({
   run,
+  selected,
+  onToggle,
   onOpen,
   onDeleted,
 }: {
   run: RunMeta;
+  selected: boolean;
+  onToggle: () => void;
   onOpen: (id: string) => void | Promise<void>;
   onDeleted: () => void;
 }) {
@@ -257,7 +403,20 @@ function SavedCard({
   });
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-3.5 transition-colors hover:border-border-strong">
+    <div
+      className={`flex items-center gap-3 rounded-lg border p-3.5 transition-colors ${
+        selected
+          ? "border-accent bg-accent/5"
+          : "border-border bg-panel hover:border-border-strong"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggle}
+        aria-label="Select run for combining"
+        className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+      />
       <button
         onClick={async () => {
           setOpening(true);

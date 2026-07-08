@@ -102,6 +102,23 @@ Paste an Instagram reel/post URL → mine the comments for ideas.
   Supabase `grab_it_runs`; Saved tab lists them (author, caption, count, date),
   click to reopen (loads full post+analysis from DB), Delete to remove. Verified
   the whole insert→list→open→delete cycle end-to-end.
+- **Ask Claude chat (2026-07-08):** streaming chat scoped to the open run
+  (`/api/grab-it/chat`, `toTextStreamResponse`); transcript + top-150 comments
+  as context; per-comment "ask about this" sets a focused-comment context;
+  suggestion chips. IMPORTANT: model is `google/gemini-2.5-flash`, NOT Claude —
+  the Gateway FREE tier returns 403 for premium models (Claude Sonnet). Switch
+  with `GRAB_IT_CHAT_MODEL` once Gateway credits are added. The user's claude.ai
+  subscription CANNOT be used as an app API credential.
+- **Collapsible sections (2026-07-08):** full transcript, ideas, questions, gaps
+  are `<details>` dropdowns (ideas open by default).
+- **Cross-reference / combine (2026-07-08):** Saved tab has checkboxes; select 2+
+  runs → "Combine & analyze" → `/api/grab-it/combine` (generateObject, Gemini
+  Flash, top-40 comments/run) → cross-video CombinedAnalysis (overview, top ideas
+  across videos, next moves, shared themes, audience patterns, gaps). Verified
+  live with the real run + a temp run.
+- **Real pipeline confirmed working:** Glazy ran it on a real reel
+  (techno.optimist.prime, 785 comments scraped) — Apify + analysis + save all
+  succeeded end-to-end.
 
 ---
 
