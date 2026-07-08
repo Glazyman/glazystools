@@ -9,6 +9,8 @@ import {
   useRef,
   useState,
 } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type {
   Analysis,
   CombinedAnalysis,
@@ -45,7 +47,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v13";
+const TOOL_VERSION = "v14";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1546,24 +1548,38 @@ function ChatPanel({
       {messages.length > 0 && (
         <div
           ref={listRef}
-          className="mb-3 max-h-[420px] space-y-3 overflow-y-auto pr-1"
+          className="mb-3 max-h-[460px] space-y-4 overflow-y-auto rounded-xl border border-border bg-bg p-3"
         >
-          {messages.map((m, i) => (
-            <div
-              key={i}
-              className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
-            >
-              <div
-                className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
-                  m.role === "user"
-                    ? "bg-accent/15 text-fg"
-                    : "border border-border bg-elevated text-fg"
-                }`}
-              >
-                {m.content || (streaming && i === messages.length - 1 ? "…" : "")}
+          {messages.map((m, i) =>
+            m.role === "user" ? (
+              <div key={i} className="flex justify-end">
+                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-accent/15 px-3.5 py-2 text-sm text-fg">
+                  {m.content}
+                </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div key={i} className="flex gap-2.5">
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[11px] text-accent">
+                  ✦
+                </span>
+                <div className="min-w-0 flex-1 rounded-2xl rounded-tl-sm border border-border bg-panel px-3.5 py-2.5">
+                  {m.content ? (
+                    <div className="chat-md">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {m.content}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <span className="inline-flex gap-1">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle [animation-delay:-0.2s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle [animation-delay:-0.1s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" />
+                    </span>
+                  )}
+                </div>
+              </div>
+            ),
+          )}
         </div>
       )}
 
@@ -1601,23 +1617,31 @@ function ChatPanel({
 
       {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
 
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2 rounded-2xl border border-border bg-panel px-2 py-1.5 focus-within:border-accent">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
           placeholder={
-            focused ? `Ask about @${focused.author}'s comment…` : "Ask a question…"
+            focused ? `Ask about @${focused.author}'s comment…` : "Ask anything…"
           }
           disabled={streaming}
-          className="flex-1 rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none disabled:opacity-60"
+          className="flex-1 bg-transparent px-2 py-1.5 text-sm text-fg placeholder:text-subtle focus:outline-none disabled:opacity-60"
         />
         <button
           onClick={() => send()}
           disabled={streaming || !input.trim()}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label="Send"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {streaming ? "…" : "Send"}
+          {streaming ? (
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-bg border-t-transparent" />
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
+            </svg>
+          )}
         </button>
       </div>
     </div>
