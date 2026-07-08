@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Analysis, ScoredComment, ScrapedPost } from "@/lib/grab-it/types";
 import {
   deleteRun,
@@ -394,6 +394,14 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
   const [minScore, setMinScore] = useState(0);
   const [category, setCategory] = useState("all");
   const [visible, setVisible] = useState(PAGE);
+  const [focused, setFocused] = useState<ScoredComment | null>(null);
+
+  function askAbout(c: ScoredComment) {
+    setFocused(c);
+    document
+      .getElementById("grab-chat")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   const categories = useMemo(
     () => ["all", ...Array.from(new Set(analysis.scoredComments.map((c) => c.category)))],
@@ -438,15 +446,35 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
         </div>
       </div>
 
-      {/* Ideas — the main payoff */}
-      <ListCard
+      {/* Full transcript — collapsed by default */}
+      <Collapsible title="📄 Full transcript">
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
+          {analysis.transcript?.trim() || "No transcript available for this video."}
+        </p>
+      </Collapsible>
+
+      {/* Ideas — the main payoff, open by default */}
+      <Collapsible
         title="💡 Ideas & follow-ups worth making"
-        items={analysis.followUpIdeas}
+        count={analysis.followUpIdeas.length}
         accent
-      />
+        defaultOpen
+      >
+        <BulletList items={analysis.followUpIdeas} />
+      </Collapsible>
       <div className="grid gap-4 md:grid-cols-2">
-        <ListCard title="What people are asking" items={analysis.audienceQuestions} />
-        <ListCard title="What's missing / wanted more" items={analysis.gaps} />
+        <Collapsible
+          title="What people are asking"
+          count={analysis.audienceQuestions.length}
+        >
+          <BulletList items={analysis.audienceQuestions} />
+        </Collapsible>
+        <Collapsible
+          title="What's missing / wanted more"
+          count={analysis.gaps.length}
+        >
+          <BulletList items={analysis.gaps} />
+        </Collapsible>
       </div>
 
       {/* Comments explorer */}
@@ -500,7 +528,7 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
 
         <div className="space-y-2">
           {shown.map((c) => (
-            <CommentCard key={c.id} c={c} />
+            <CommentCard key={c.id} c={c} onAsk={askAbout} />
           ))}
           {sorted.length === 0 && (
             <p className="text-sm text-subtle">No comments match this filter.</p>
@@ -517,6 +545,14 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
           </button>
         )}
       </div>
+
+      {/* Ask Claude about the video or a comment */}
+      <ChatPanel
+        post={post}
+        analysis={analysis}
+        focused={focused}
+        onClearFocus={() => setFocused(null)}
+      />
 
       {/* Draft replies — secondary, tucked away */}
       {analysis.draftComments.length > 0 && (
@@ -536,7 +572,13 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
   );
 }
 
-function CommentCard({ c }: { c: ScoredComment }) {
+function CommentCard({
+  c,
+  onAsk,
+}: {
+  c: ScoredComment;
+  onAsk: (c: ScoredComment) => void;
+}) {
   const [showReply, setShowReply] = useState(false);
   return (
     <div className="rounded-lg border border-border bg-elevated p-3.5">
@@ -553,22 +595,209 @@ function CommentCard({ c }: { c: ScoredComment }) {
           </div>
           <p className="mt-1 text-sm text-fg">{c.text}</p>
           <p className="mt-1 text-xs italic text-subtle">{c.reason}</p>
-          {c.replyIdea && (
-            <div className="mt-2">
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              onClick={() => onAsk(c)}
+              className="text-xs text-muted hover:text-accent hover:underline"
+            >
+              💬 ask about this
+            </button>
+            {c.replyIdea && (
               <button
                 onClick={() => setShowReply((s) => !s)}
-                className="text-xs text-accent hover:underline"
+                className="text-xs text-muted hover:text-accent hover:underline"
               >
-                {showReply ? "hide reply idea" : "💬 reply idea"}
+                {showReply ? "hide reply idea" : "✍️ reply idea"}
               </button>
-              {showReply && (
-                <div className="mt-1.5 rounded-md border border-accent/20 bg-accent/5 p-2 text-xs text-fg">
-                  {c.replyIdea}
-                </div>
-              )}
+            )}
+          </div>
+          {showReply && c.replyIdea && (
+            <div className="mt-1.5 rounded-md border border-accent/20 bg-accent/5 p-2 text-xs text-fg">
+              {c.replyIdea}
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+type ChatMsg = { role: "user" | "assistant"; content: string };
+
+const SUGGESTIONS = [
+  "What are the best ideas in these comments?",
+  "What are people confused about or asking for?",
+  "Summarize the criticism.",
+  "What should my next video be?",
+];
+
+function ChatPanel({
+  post,
+  analysis,
+  focused,
+  onClearFocus,
+}: {
+  post: ScrapedPost;
+  analysis: Analysis;
+  focused: ScoredComment | null;
+  onClearFocus: () => void;
+}) {
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Fresh conversation whenever a different run is loaded.
+  useEffect(() => {
+    setMessages([]);
+    setError(null);
+  }, [post.url]);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [messages]);
+
+  function buildContext() {
+    return {
+      author: post.author,
+      summary: analysis.videoSummary,
+      transcript: analysis.transcript,
+      transcriptSource: analysis.transcriptSource,
+      comments: analysis.scoredComments.slice(0, 150).map((c) => ({
+        author: c.author,
+        text: c.text,
+        likes: c.likes,
+        score: c.score,
+      })),
+      focused: focused ? { author: focused.author, text: focused.text } : null,
+    };
+  }
+
+  async function send(text?: string) {
+    const q = (text ?? input).trim();
+    if (!q || streaming) return;
+    const next: ChatMsg[] = [...messages, { role: "user", content: q }];
+    setMessages(next);
+    setInput("");
+    setStreaming(true);
+    setError(null);
+    const wasFocused = !!focused;
+    try {
+      const res = await fetch("/api/grab-it/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next, context: buildContext() }),
+      });
+      if (!res.ok || !res.body) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error ?? "Chat failed.");
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let acc = "";
+      setMessages((m) => [...m, { role: "assistant", content: "" }]);
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += dec.decode(value, { stream: true });
+        setMessages((m) => {
+          const cp = [...m];
+          cp[cp.length - 1] = { role: "assistant", content: acc };
+          return cp;
+        });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Chat failed.");
+    } finally {
+      setStreaming(false);
+      if (wasFocused) onClearFocus(); // the comment applied to that question
+    }
+  }
+
+  return (
+    <div id="grab-chat" className="rounded-xl border border-border bg-panel p-5">
+      <h3 className="mb-1 text-sm font-semibold text-fg">💬 Ask Claude</h3>
+      <p className="mb-3 text-xs text-muted">
+        Ask anything about the video or the comments.
+      </p>
+
+      {messages.length > 0 && (
+        <div
+          ref={listRef}
+          className="mb-3 max-h-[420px] space-y-3 overflow-y-auto pr-1"
+        >
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
+            >
+              <div
+                className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
+                  m.role === "user"
+                    ? "bg-accent/15 text-fg"
+                    : "border border-border bg-elevated text-fg"
+                }`}
+              >
+                {m.content || (streaming && i === messages.length - 1 ? "…" : "")}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Suggestions on an empty conversation */}
+      {messages.length === 0 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => send(s)}
+              className="rounded-full border border-border bg-elevated px-3 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-fg"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Focused-comment chip */}
+      {focused && (
+        <div className="mb-2 flex items-center gap-2 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-xs">
+          <span className="min-w-0 flex-1 truncate text-muted">
+            Asking about <span className="text-fg">@{focused.author}</span>: “
+            {focused.text}”
+          </span>
+          <button
+            onClick={onClearFocus}
+            aria-label="Clear focused comment"
+            className="shrink-0 text-subtle hover:text-fg"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {error && <p className="mb-2 text-xs text-red-300">{error}</p>}
+
+      <div className="flex gap-2">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder={
+            focused ? `Ask about @${focused.author}'s comment…` : "Ask a question…"
+          }
+          disabled={streaming}
+          className="flex-1 rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none disabled:opacity-60"
+        />
+        <button
+          onClick={() => send()}
+          disabled={streaming || !input.trim()}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {streaming ? "…" : "Send"}
+        </button>
       </div>
     </div>
   );
@@ -591,34 +820,54 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-function ListCard({
+function Collapsible({
   title,
-  items,
+  count,
   accent,
+  defaultOpen,
+  children,
 }: {
   title: string;
-  items: string[];
+  count?: number;
   accent?: boolean;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
 }) {
   return (
-    <div
-      className={`rounded-xl border p-5 ${
+    <details
+      open={defaultOpen}
+      className={`group rounded-xl border p-5 ${
         accent ? "border-accent/30 bg-accent/5" : "border-border bg-panel"
       }`}
     >
-      <h3 className="mb-3 text-sm font-semibold text-fg">{title}</h3>
-      <ul className="space-y-2">
-        {items.map((item, i) => (
-          <li key={i} className="flex gap-2 text-sm text-fg">
-            <span className="text-subtle">•</span>
-            <span>{item}</span>
-          </li>
-        ))}
-        {items.length === 0 && (
-          <li className="text-sm text-subtle">Nothing surfaced here.</li>
-        )}
-      </ul>
-    </div>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-fg">
+        <span>
+          {title}
+          {count != null && (
+            <span className="ml-1.5 font-normal text-subtle">({count})</span>
+          )}
+        </span>
+        <span className="text-subtle transition-transform group-open:rotate-180">
+          ⌄
+        </span>
+      </summary>
+      <div className="mt-3">{children}</div>
+    </details>
+  );
+}
+
+function BulletList({ items }: { items: string[] }) {
+  if (items.length === 0)
+    return <p className="text-sm text-subtle">Nothing surfaced here.</p>;
+  return (
+    <ul className="space-y-2">
+      {items.map((item, i) => (
+        <li key={i} className="flex gap-2 text-sm text-fg">
+          <span className="text-subtle">•</span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
