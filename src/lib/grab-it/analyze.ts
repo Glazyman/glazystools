@@ -139,15 +139,19 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
   const meaningful = post.comments.filter((c) => !isJunk(c.text));
   const comments = meaningful.slice(0, MAX_COMMENTS_TO_SCORE);
 
+  const isVideo = post.kind === "video";
+  const noun = isVideo ? "video" : "post"; // adapt wording to the content type
+  const bodyLabel = isVideo ? "VIDEO TRANSCRIPT" : "POST TEXT";
+
   const prompt = [
-    `You are helping a creator mine the comments on an Instagram ${post.type ?? "post"} for great ideas and add-ons.`,
+    `You are helping a creator mine the comments on a ${noun} for great ideas and add-ons.`,
     ``,
     `AUTHOR: @${post.author}`,
     `CAPTION: ${post.caption || "(none)"}`,
     ``,
     transcriptSource === "unavailable"
-      ? `VIDEO TRANSCRIPT: (unavailable — reason about the caption + comments only)`
-      : `VIDEO TRANSCRIPT (${transcriptSource}):\n${transcript}`,
+      ? `${bodyLabel}: (unavailable — reason about the caption + comments only)`
+      : `${bodyLabel} (${transcriptSource}):\n${transcript}`,
     ``,
     `COMMENTS (${comments.length} of ${post.commentsCount ?? comments.length}) — id | @author | likes | text:`,
     ...comments.map(
@@ -157,8 +161,8 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     `My main goal: mine the comments for good ideas and add-ons — NOT to write replies. Replies are a nice-to-have afterthought.`,
     ``,
     `Tasks:`,
-    `1. Summarize what the video is really about.`,
-    `2. Read every comment against the video. Score each 0-100 on how much value/insight it adds (great add-ons, ideas, corrections, sharp questions score high; spam/emoji/generic praise score low). Return one entry per comment id above.`,
+    `1. Summarize what this ${noun} is really about.`,
+    `2. Read every comment against the ${noun}. Score each 0-100 on how much value/insight it adds (great add-ons, ideas, corrections, sharp questions score high; spam/emoji/generic praise score low). Return one entry per comment id above.`,
     `3. Pull out the best ideas & add-ons the commenters surfaced (this is the point), plus what people are asking and what's missing.`,
     `4. Only briefly: a few draft replies I could post. Keep this minimal.`,
   ].join("\n");

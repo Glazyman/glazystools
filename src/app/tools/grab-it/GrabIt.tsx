@@ -588,7 +588,6 @@ function deriveShortcode(url: string): string | undefined {
 
 function VideoPlayer({ post }: { post: ScrapedPost }) {
   const [failed, setFailed] = useState(false);
-  const shortcode = post.shortcode ?? deriveShortcode(post.url);
 
   if (post.videoUrl && !failed) {
     return (
@@ -602,7 +601,10 @@ function VideoPlayer({ post }: { post: ScrapedPost }) {
       />
     );
   }
-  if (shortcode) {
+  // Instagram-only embed fallback (other platforms don't share this embed URL).
+  const isInstagram = /instagram\.com/i.test(post.url);
+  const shortcode = post.shortcode ?? deriveShortcode(post.url);
+  if (isInstagram && shortcode) {
     return (
       <iframe
         title="Instagram video"
@@ -619,8 +621,38 @@ function VideoPlayer({ post }: { post: ScrapedPost }) {
       rel="noopener noreferrer"
       className="flex h-40 items-center justify-center rounded-lg border border-dashed border-border-strong text-sm text-muted"
     >
-      Open on Instagram ↗
+      Open original ↗
     </a>
+  );
+}
+
+const KIND_BADGE: Record<ScrapedPost["kind"], string> = {
+  video: "🎥 Video",
+  image: "🖼 Image post",
+  text: "📝 Text post",
+};
+
+// Shows the right media for the content type: a video player, an image, or the
+// text of a text post.
+function MediaBlock({ post }: { post: ScrapedPost }) {
+  if (post.kind === "video" || post.videoUrl) return <MediaBlock post={post} />;
+  if (post.kind === "image" && post.displayUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={post.displayUrl}
+        alt="post"
+        className="max-h-[460px] w-full rounded-lg bg-black object-contain"
+      />
+    );
+  }
+  return (
+    <div className="flex max-h-[460px] flex-col overflow-y-auto rounded-lg border border-border bg-elevated p-4">
+      <span className="mb-2 text-xs text-subtle">📝 Text post</span>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
+        {post.caption?.trim() || "(no text)"}
+      </p>
+    </div>
   );
 }
 
@@ -649,7 +681,7 @@ function DownloadButton({ post }: { post: ScrapedPost }) {
 function DownloadView({ post }: { post: ScrapedPost }) {
   return (
     <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
-      <VideoPlayer post={post} />
+      <MediaBlock post={post} />
       <div className="space-y-3 rounded-xl border border-border bg-panel p-5">
         <div className="text-sm">
           <span className="font-medium text-fg">@{post.author}</span>
@@ -683,7 +715,7 @@ function TranscriptView({
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
-        <VideoPlayer post={post} />
+        <MediaBlock post={post} />
         <div className="space-y-3 rounded-xl border border-border bg-panel p-5">
           <div className="text-sm">
             <span className="font-medium text-fg">@{post.author}</span>
@@ -697,10 +729,14 @@ function TranscriptView({
         </div>
       </div>
       <div className="rounded-xl border border-border bg-panel p-5">
-        <h3 className="mb-2 text-sm font-semibold text-fg">📄 Transcript</h3>
+        <h3 className="mb-2 text-sm font-semibold text-fg">
+          {post.kind === "video" ? "📄 Transcript" : "📄 Post text"}
+        </h3>
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
           {result.transcript?.trim() ||
-            "No transcript could be produced for this video."}
+            (post.kind === "video"
+              ? "No transcript could be produced for this video."
+              : "This post has no text.")}
         </p>
       </div>
     </div>
@@ -752,18 +788,23 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
       {/* Meta */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
         <span className="font-medium text-fg">@{post.author}</span>
+        <span className="rounded bg-elevated px-1.5 py-0.5">
+          {KIND_BADGE[post.kind] ?? (post.videoUrl ? "🎥 Video" : "📝 Post")}
+        </span>
         <span>{post.commentsCount ?? post.comments.length} comments</span>
         {post.likes != null && <span>{post.likes.toLocaleString()} likes</span>}
         <a href={post.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-          view on Instagram ↗
+          view original ↗
         </a>
       </div>
 
-      {/* Video + what it's about */}
+      {/* Media + what it's about */}
       <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
-        <VideoPlayer post={post} />
+        <MediaBlock post={post} />
         <div className="rounded-xl border border-border bg-panel p-5">
-          <h3 className="mb-2 text-sm font-semibold text-fg">What the video is about</h3>
+          <h3 className="mb-2 text-sm font-semibold text-fg">
+            What this {post.kind === "video" ? "video" : "post"} is about
+          </h3>
           <p className="text-sm leading-relaxed text-fg">{analysis.videoSummary}</p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <span className="inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">

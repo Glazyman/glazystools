@@ -1,4 +1,9 @@
-import { normalizeComment, runActor, scrapeInstagram } from "./apify";
+import {
+  classifyKind,
+  normalizeComment,
+  runActor,
+  scrapeInstagram,
+} from "./apify";
 import type { ScrapedComment, ScrapedPost } from "./types";
 
 // Multi-platform scraping. Each platform maps to an Apify actor (overridable via
@@ -71,17 +76,36 @@ function buildPost(
   comments: ScrapedComment[],
 ): ScrapedPost {
   const videoMeta = (item.videoMeta ?? {}) as Record<string, unknown>;
+  const caption = String(
+    item.caption ??
+      item.text ??
+      item.title ??
+      item.description ??
+      item.fullText ??
+      item.full_text ??
+      item.body ??
+      item.selftext ??
+      "",
+  );
+  const type = item.type ? String(item.type) : undefined;
+  const videoUrl = firstString(
+    item.videoUrl,
+    videoMeta.downloadAddr,
+    item.mediaUrl,
+    (item.video as Record<string, unknown>)?.url,
+    item.downloadUrl,
+    Array.isArray(item.mediaUrls) ? (item.mediaUrls[0] as string) : undefined,
+  );
+  const displayUrl = firstString(
+    item.displayUrl,
+    item.thumbnailUrl,
+    item.coverUrl,
+    item.thumbnail,
+    videoMeta.coverUrl,
+  );
   return {
     url,
-    caption: String(
-      item.caption ??
-        item.text ??
-        item.title ??
-        item.description ??
-        item.fullText ??
-        item.full_text ??
-        "",
-    ),
+    caption,
     author: String(
       item.author ??
         (item.authorMeta as Record<string, unknown>)?.name ??
@@ -92,22 +116,10 @@ function buildPost(
         item.userName ??
         "unknown",
     ),
-    type: item.type ? String(item.type) : undefined,
-    videoUrl: firstString(
-      item.videoUrl,
-      videoMeta.downloadAddr,
-      item.mediaUrl,
-      (item.video as Record<string, unknown>)?.url,
-      item.downloadUrl,
-      Array.isArray(item.mediaUrls) ? (item.mediaUrls[0] as string) : undefined,
-    ),
-    displayUrl: firstString(
-      item.displayUrl,
-      item.thumbnailUrl,
-      item.coverUrl,
-      item.thumbnail,
-      videoMeta.coverUrl,
-    ),
+    type,
+    kind: classifyKind({ videoUrl, displayUrl, type, caption }),
+    videoUrl,
+    displayUrl,
     likes: num(
       item.likesCount,
       item.diggCount,

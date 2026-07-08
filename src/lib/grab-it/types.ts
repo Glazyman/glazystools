@@ -12,7 +12,8 @@ export type ScrapedComment = {
 export type ScrapedPost = {
   url: string;
   shortcode?: string;
-  type?: string; // "Video" | "Image" | "Sidecar"
+  type?: string; // raw platform type, e.g. "Video" | "Image" | "Sidecar"
+  kind: "video" | "image" | "text"; // normalized: does it actually have a video?
   caption: string;
   author: string;
   videoUrl?: string;

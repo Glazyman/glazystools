@@ -87,6 +87,21 @@ export function normalizeComment(
   };
 }
 
+// Decide whether a scraped item is a video, image, or text post — so the UI and
+// analysis adapt (a Reddit self-post has no video to transcribe or download).
+export function classifyKind(o: {
+  videoUrl?: string;
+  displayUrl?: string;
+  type?: string;
+  caption?: string;
+}): "video" | "image" | "text" {
+  const t = (o.type ?? "").toLowerCase();
+  if (o.videoUrl || /video|reel|clip|short/.test(t)) return "video";
+  if (/image|photo|sidecar|carousel|gif/.test(t)) return "image";
+  if (/text|self|link|article/.test(t)) return "text";
+  return o.displayUrl && !o.caption ? "image" : "text";
+}
+
 export async function scrapeInstagram(
   url: string,
   commentLimit = 200,
@@ -135,14 +150,19 @@ export async function scrapeInstagram(
     comments.push(c);
   });
 
+  const type = post.type ? String(post.type) : undefined;
+  const videoUrl = post.videoUrl ? String(post.videoUrl) : undefined;
+  const displayUrl = post.displayUrl ? String(post.displayUrl) : undefined;
+  const caption = String(post.caption ?? "");
   return {
     url,
     shortcode: post.shortCode ? String(post.shortCode) : undefined,
-    type: post.type ? String(post.type) : undefined,
-    caption: String(post.caption ?? ""),
+    type,
+    kind: classifyKind({ videoUrl, displayUrl, type, caption }),
+    caption,
     author: String(post.ownerUsername ?? post.ownerFullName ?? "unknown"),
-    videoUrl: post.videoUrl ? String(post.videoUrl) : undefined,
-    displayUrl: post.displayUrl ? String(post.displayUrl) : undefined,
+    videoUrl,
+    displayUrl,
     likes: Number(post.likesCount ?? 0) || undefined,
     commentsCount: Number(post.commentsCount ?? comments.length) || undefined,
     comments,
