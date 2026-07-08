@@ -3,14 +3,34 @@ import { z } from "zod";
 import type { Analysis, ScoredComment, ScrapedPost } from "./types";
 
 // Model IDs are plain "provider/model" strings → routed through the Vercel AI
-// Gateway (one key for every provider). Override via env if you like.
+// Gateway (one key for every provider). Defaults are the cheapest sensible
+// choice (Gemini Flash for everything); override via env to trade up on quality.
+//   e.g. GRAB_IT_ANALYSIS_MODEL=anthropic/claude-sonnet-4.5 for stronger ideas.
 const ANALYSIS_MODEL =
-  process.env.GRAB_IT_ANALYSIS_MODEL ?? "anthropic/claude-sonnet-4.5";
+  process.env.GRAB_IT_ANALYSIS_MODEL ?? "google/gemini-2.5-flash";
 const VIDEO_MODEL =
   process.env.GRAB_IT_VIDEO_MODEL ?? "google/gemini-2.5-flash";
 
 const MAX_VIDEO_BYTES = 20 * 1024 * 1024; // 20 MB — inline limit for video parts
 const MAX_COMMENTS_TO_SCORE = 200;
+
+// Free pre-filter: drop comments the model would score ~0 anyway (emoji-only,
+// pure @mention/#hashtag tags, empty). Saves tokens without losing signal —
+// anything with actual words is kept. Instagram's "tag-a-friend" spam is a huge
+// share of comments, so this trims a lot before the LLM ever sees it.
+const EMOJI_ONLY = /^[\p{Extended_Pictographic}\p{Emoji_Component}️‍\s]+$/u;
+
+function isJunk(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (EMOJI_ONLY.test(t)) return true;
+  // Remove @mentions and #hashtags; if no real letters/numbers remain, it's a tag.
+  const meaningful = t
+    .replace(/[@#][\w.]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return meaningful.length < 2;
+}
 
 // Step 2 — "Understand it": get the words the video actually says.
 // Reels rarely ship a transcript, so we send the video to a multimodal model.
@@ -105,7 +125,9 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     transcriptSource = "captions";
   }
 
-  const comments = post.comments.slice(0, MAX_COMMENTS_TO_SCORE);
+  // Drop junk for free, then cap what the model scores.
+  const meaningful = post.comments.filter((c) => !isJunk(c.text));
+  const comments = meaningful.slice(0, MAX_COMMENTS_TO_SCORE);
 
   const prompt = [
     `You are helping a creator mine the comments on an Instagram ${post.type ?? "post"} for great ideas and add-ons.`,

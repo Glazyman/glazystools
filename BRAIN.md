@@ -44,9 +44,14 @@ obvious.
 
 ### Grab It (`grab-it`) — status: wip
 Paste an Instagram reel/post URL → mine the comments for ideas.
-- **Flow:** Apify scrape (caption, video, all comments) → transcribe video via
-  Gemini (`google/gemini-2.5-flash`) → Claude (`anthropic/claude-sonnet-4.5`)
-  scores every comment 0-100, surfaces questions/gaps, drafts follow-ups + replies.
+- **Flow:** Apify scrape (caption, video, all comments) → free junk pre-filter
+  (drop emoji-only / pure @mention / #hashtag / bare-number comments) →
+  transcribe video via Gemini Flash → analysis via **Gemini 2.5 Flash**
+  (cheapest; scores every comment 0-100, surfaces questions/gaps, drafts
+  follow-ups + replies). Bump quality anytime with
+  `GRAB_IT_ANALYSIS_MODEL=anthropic/claude-sonnet-4.5`.
+- **Cost decisions (2026-07-08):** kept Apify (free $5/mo credits); chose
+  Gemini Flash for everything to minimize cost (~1¢/reel vs ~10-15¢ on Sonnet).
 - **Files:** `src/lib/grab-it/{types,apify,analyze}.ts`,
   `src/app/api/grab-it/{scrape,analyze}/route.ts`,
   `src/app/tools/grab-it/{page,GrabIt}.tsx`.
