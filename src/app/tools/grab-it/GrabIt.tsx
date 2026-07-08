@@ -38,7 +38,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v6";
+const TOOL_VERSION = "v7";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -763,7 +763,7 @@ const KIND_BADGE: Record<ScrapedPost["kind"], string> = {
 // Shows the right media for the content type: a video player, an image, or the
 // text of a text post.
 function MediaBlock({ post }: { post: ScrapedPost }) {
-  if (post.kind === "video" || post.videoUrl) return <MediaBlock post={post} />;
+  if (post.kind === "video" || post.videoUrl) return <VideoPlayer post={post} />;
   if (post.kind === "image" && post.displayUrl) {
     // eslint-disable-next-line @next/next/no-img-element
     return (
