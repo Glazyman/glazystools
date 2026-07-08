@@ -4,8 +4,8 @@ import { usePathname } from "next/navigation";
 import { getTool } from "@/lib/tools";
 
 function crumbs(pathname: string) {
-  if (pathname === "/") return ["Dashboard"];
-  if (pathname === "/tools") return ["All Tools"];
+  if (pathname === "/") return ["Hub"];
+  if (pathname === "/tools") return ["Hub"];
   const m = pathname.match(/^\/tools\/([^/]+)/);
   if (m) {
     const tool = getTool(m[1]);
