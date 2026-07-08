@@ -648,42 +648,30 @@ function deriveShortcode(url: string): string | undefined {
   return url.match(/\/(?:reel|reels|p|tv)\/([^/?#]+)/)?.[1];
 }
 
+// Click-to-play: NOTHING heavy (video file or embed iframe) mounts until the
+// user clicks Play. Auto-loading a large cross-origin Instagram video was
+// freezing the tab (Chrome RESULT_CODE_HUNG), so results now render a light card.
 function VideoPlayer({ post }: { post: ScrapedPost }) {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [embed, setEmbed] = useState(false);
+  const [mode, setMode] = useState<"idle" | "video" | "embed">("idle");
   const isInstagram = /instagram\.com/i.test(post.url);
   const shortcode = post.shortcode ?? deriveShortcode(post.url);
 
-  // If the direct video file doesn't start loading within a few seconds (common
-  // for hotlink-protected Instagram CDN URLs, which otherwise spin forever), bail
-  // to the safe placeholder instead of hanging the page.
-  useEffect(() => {
-    if (!post.videoUrl || failed || loaded) return;
-    const t = setTimeout(() => setFailed(true), 7000);
-    return () => clearTimeout(t);
-  }, [post.videoUrl, failed, loaded]);
-
-  // 1) Try the direct video file. We NEVER auto-load an embed iframe (that can
-  //    freeze the page) — the embed is behind an explicit button below.
-  if (post.videoUrl && !failed) {
+  if (mode === "video" && post.videoUrl) {
     return (
       <video
         controls
+        autoPlay
         playsInline
         preload="metadata"
-        poster={post.displayUrl}
-        onLoadedMetadata={() => setLoaded(true)}
-        onError={() => setFailed(true)}
-        onStalled={() => setFailed(true)}
         src={post.videoUrl}
+        onError={() =>
+          setMode(isInstagram && shortcode ? "embed" : "idle")
+        }
         className="max-h-[460px] w-full rounded-lg bg-black object-contain"
       />
     );
   }
-
-  // 2) Embed player — ONLY when the user explicitly asks (never auto-loaded).
-  if (embed && isInstagram && shortcode) {
+  if (mode === "embed" && isInstagram && shortcode) {
     const path = /\/p\//.test(post.url) ? "p" : "reel";
     return (
       <iframe
@@ -695,45 +683,37 @@ function VideoPlayer({ post }: { post: ScrapedPost }) {
     );
   }
 
-  // 3) Safe placeholder: poster + explicit actions. Never hangs the page.
+  const canPlayInline = !!post.videoUrl;
+  const canEmbed = isInstagram && !!shortcode;
   return (
-    <div className="relative flex min-h-[220px] flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-border bg-black/40 p-4">
-      {post.displayUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={post.displayUrl}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover opacity-30"
-        />
-      )}
-      <div className="relative flex flex-col items-center gap-2 text-center">
-        <a
-          href={post.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg hover:bg-accent-strong"
+    <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-lg border border-border bg-black/40 p-6 text-center">
+      {(canPlayInline || canEmbed) && (
+        <button
+          onClick={() => setMode(canPlayInline ? "video" : "embed")}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-xl text-bg hover:bg-accent-strong"
+          aria-label="Play video"
         >
-          ▶ Open original ↗
+          ▶
+        </button>
+      )}
+      <a
+        href={post.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-accent hover:underline"
+      >
+        Open original ↗
+      </a>
+      {post.videoUrl && (
+        <a
+          href={`/api/grab-it/download?url=${encodeURIComponent(
+            post.videoUrl,
+          )}&name=${encodeURIComponent(`${post.author}-video`)}`}
+          className="text-xs text-muted hover:text-fg"
+        >
+          ⬇ download video
         </a>
-        {post.videoUrl && (
-          <a
-            href={`/api/grab-it/download?url=${encodeURIComponent(
-              post.videoUrl,
-            )}&name=${encodeURIComponent(`${post.author}-video`)}`}
-            className="text-xs text-muted hover:text-fg"
-          >
-            ⬇ download video
-          </a>
-        )}
-        {isInstagram && shortcode && (
-          <button
-            onClick={() => setEmbed(true)}
-            className="text-xs text-subtle hover:text-fg"
-          >
-            load embedded player
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 }
