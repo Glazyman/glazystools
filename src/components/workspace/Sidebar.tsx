@@ -83,7 +83,9 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                         : "text-muted hover:bg-hover hover:text-fg"
                     }`}
                   >
-                    <span className="text-base leading-none">{tool.icon}</span>
+                    {tool.icon && (
+                      <span className="text-base leading-none">{tool.icon}</span>
+                    )}
                     <span className="flex-1 truncate">{tool.name}</span>
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${

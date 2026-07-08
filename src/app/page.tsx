@@ -54,12 +54,16 @@ export default function Dashboard() {
             <Link
               key={tool.slug}
               href={`/tools/${tool.slug}`}
-              className="group rounded-xl border border-border bg-panel p-5 transition-colors hover:border-border-strong hover:bg-elevated"
+              className="group rounded-2xl border border-border bg-panel p-5 shadow-card transition-all hover:-translate-y-0.5 hover:border-border-strong"
             >
               <div className="mb-3 flex items-center justify-between">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-elevated text-lg">
-                  {tool.icon}
-                </span>
+                {tool.icon ? (
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-elevated text-lg">
+                    {tool.icon}
+                  </span>
+                ) : (
+                  <span />
+                )}
                 <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-subtle">
                   {statusLabel[tool.status]}
                 </span>
@@ -78,7 +82,7 @@ export default function Dashboard() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-border bg-panel px-4 py-3">
+    <div className="rounded-2xl border border-border bg-panel px-4 py-3 shadow-card">
       <div className="text-2xl font-semibold tabular-nums">{value}</div>
       <div className="text-xs text-muted">{label}</div>
     </div>

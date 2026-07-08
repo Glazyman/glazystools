@@ -38,7 +38,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v10";
+const TOOL_VERSION = "v11";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -53,7 +53,7 @@ class ResultsBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-600">
           Display error: {this.state.error} — the run data is safe; try Saved →
           reopen, and report this message.
         </div>
@@ -107,7 +107,7 @@ function ErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
       <span className="min-w-0 flex-1">{message}</span>
       <button
         onClick={onRetry}
@@ -388,10 +388,10 @@ function SaveIndicator({ state }: { state: SaveState }) {
   if (state === "idle") return null;
   const map = {
     saving: { text: "Saving to your library…", cls: "text-muted" },
-    saved: { text: "✓ Saved — find it in the Saved tab", cls: "text-emerald-400" },
+    saved: { text: "✓ Saved — find it in the Saved tab", cls: "text-emerald-700" },
     error: {
       text: "Couldn't save this run (it's still shown here).",
-      cls: "text-amber-400",
+      cls: "text-amber-700",
     },
   } as const;
   const s = map[state as keyof typeof map];
@@ -519,7 +519,7 @@ function SavedView({
         </div>
       )}
 
-      {error && <p className="text-xs text-red-300">{error}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
 
       {combined && (
         <CombinedResult combined={combined} onClose={() => setCombined(null)} />
@@ -659,7 +659,7 @@ function SavedCard({
         }}
         disabled={deleting}
         aria-label="Delete saved run"
-        className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-subtle hover:bg-hover hover:text-red-300 disabled:opacity-50"
+        className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-subtle hover:bg-hover hover:text-red-600 disabled:opacity-50"
       >
         {deleting ? "…" : "Delete"}
       </button>
@@ -680,7 +680,7 @@ function StageBar({ stage }: { stage: Stage }) {
             <span
               className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${
                 done
-                  ? "bg-emerald-500/20 text-emerald-400"
+                  ? "bg-emerald-500/20 text-emerald-700"
                   : active
                     ? "bg-accent/20 text-accent"
                     : "bg-elevated text-subtle"
@@ -748,7 +748,7 @@ function VideoPlayer({ post }: { post: ScrapedPost }) {
         </button>
       )}
       {playError && (
-        <p className="text-xs text-amber-300">
+        <p className="text-xs text-amber-700">
           Playback failed — the source may have expired. Try the original link.
         </p>
       )}
@@ -830,7 +830,7 @@ function DownloadView({ post }: { post: ScrapedPost }) {
   return (
     <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
       <MediaBlock post={post} />
-      <div className="space-y-3 rounded-xl border border-border bg-panel p-5">
+      <div className="space-y-3 rounded-2xl border border-border bg-panel p-5 shadow-card">
         <div className="text-sm">
           <span className="font-medium text-fg">@{post.author}</span>
           {post.caption && (
@@ -864,7 +864,7 @@ function TranscriptView({
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
         <MediaBlock post={post} />
-        <div className="space-y-3 rounded-xl border border-border bg-panel p-5">
+        <div className="space-y-3 rounded-2xl border border-border bg-panel p-5 shadow-card">
           <div className="text-sm">
             <span className="font-medium text-fg">@{post.author}</span>
           </div>
@@ -876,7 +876,7 @@ function TranscriptView({
           </div>
         </div>
       </div>
-      <div className="rounded-xl border border-border bg-panel p-5">
+      <div className="rounded-2xl border border-border bg-panel p-5 shadow-card">
         <h3 className="mb-2 text-sm font-semibold text-fg">
           {post.kind === "video" ? "📄 Transcript" : "📄 Post text"}
         </h3>
@@ -1024,12 +1024,12 @@ function Results({
         <span>{totalComments.toLocaleString()} comments</span>
         {post.likes != null && <span>{post.likes.toLocaleString()} likes</span>}
         {post.commentSource === "login" && (
-          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-400">
+          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-700">
             ✓ comments via login
           </span>
         )}
         {post.commentSource === "logged-out" && (
-          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">
+          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-700">
             ⚠ logged-out fallback (limited)
           </span>
         )}
@@ -1173,7 +1173,7 @@ function Results({
         </div>
 
         {totalComments > post.comments.length + 5 && (
-          <p className="mb-3 text-[11px] text-amber-300/80">
+          <p className="mb-3 text-[11px] text-amber-700/80">
             Instagram only exposed {post.comments.length.toLocaleString()} of ~
             {totalComments.toLocaleString()} comments to the scraper for this post
             (it varies per post — some allow thousands, some only a handful). All
@@ -1224,7 +1224,7 @@ function Results({
           id="grab-chat"
           open={chatOpen}
           onToggle={(e) => setChatOpen(e.currentTarget.open)}
-          className="group rounded-xl border border-border bg-panel p-5"
+          className="group rounded-2xl border border-border bg-panel p-5 shadow-card"
         >
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-fg">
             <span>💬 Ask Claude</span>
@@ -1244,7 +1244,7 @@ function Results({
       )}
 
       {hasAI && analysis!.draftComments.length > 0 && (
-        <details className="rounded-xl border border-border bg-panel p-5">
+        <details className="rounded-2xl border border-border bg-panel p-5 shadow-card">
           <summary className="cursor-pointer text-sm font-semibold text-fg">
             ✍️ Draft replies you could post{" "}
             <span className="font-normal text-subtle">(optional)</span>
@@ -1486,7 +1486,7 @@ function ChatPanel({
         </div>
       )}
 
-      {error && <p className="mb-2 text-xs text-red-300">{error}</p>}
+      {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
 
       <div className="flex gap-2">
         <input
@@ -1514,9 +1514,9 @@ function ChatPanel({
 function ScoreBadge({ score }: { score: number }) {
   const color =
     score >= 70
-      ? "bg-emerald-500/20 text-emerald-400"
+      ? "bg-emerald-500/20 text-emerald-700"
       : score >= 40
-        ? "bg-amber-500/20 text-amber-400"
+        ? "bg-amber-500/20 text-amber-700"
         : "bg-elevated text-subtle";
   return (
     <span
@@ -1544,7 +1544,7 @@ function Collapsible({
   return (
     <details
       open={defaultOpen}
-      className={`group rounded-xl border p-5 ${
+      className={`group rounded-2xl border p-5 shadow-card ${
         accent ? "border-accent/30 bg-accent/5" : "border-border bg-panel"
       }`}
     >

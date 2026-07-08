@@ -63,10 +63,6 @@ export function TopBar({
       </div>
       <div className="flex items-center gap-3 text-xs text-subtle">
         <span className="hidden sm:inline">Glazy&apos;s Tools</span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          local
-        </span>
       </div>
     </header>
   );

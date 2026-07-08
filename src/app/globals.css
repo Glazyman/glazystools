@@ -5,24 +5,28 @@
    theme() and CSS vars so tool pages stay visually consistent. */
 
 :root {
-  /* Surfaces, from deepest to raised */
-  --bg: #0b0d10;          /* app background */
-  --bg-panel: #111419;    /* sidebar / panels */
-  --bg-elevated: #171b22; /* cards, inputs */
-  --bg-hover: #1d222b;
+  /* Light, soft, card-based theme */
+  --bg: #f4f5f7;          /* app background (light grey) */
+  --bg-panel: #ffffff;    /* sidebar / cards (white) */
+  --bg-elevated: #f1f3f6; /* inputs / subtle fills */
+  --bg-hover: #eceef2;
 
   /* Lines */
-  --border: #232a34;
-  --border-strong: #313a47;
+  --border: #e7e9ee;
+  --border-strong: #d6dae1;
 
   /* Text */
-  --fg: #e6e9ee;
-  --fg-muted: #9aa4b2;
-  --fg-subtle: #5f6b7a;
+  --fg: #1f2430;
+  --fg-muted: #6b7280;
+  --fg-subtle: #99a1af;
 
-  /* Brand accent */
-  --accent: #6ea8fe;
-  --accent-strong: #4c8dff;
+  /* Brand accent — olive green (dark enough for light text on buttons) */
+  --accent: #66802f;
+  --accent-strong: #56702a;
+
+  /* Soft card shadow */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04),
+    0 4px 16px rgba(16, 24, 40, 0.06);
 }
 
 @theme inline {
@@ -37,6 +41,8 @@
   --color-subtle: var(--fg-subtle);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
+
+  --shadow-card: var(--shadow-card);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
