@@ -36,8 +36,22 @@ obvious.
 
 ## Open questions / next up
 
-- [ ] Live end-to-end test of Grab It with a real Instagram URL (waiting on Glazy).
+- [ ] **Add Vercel AI Gateway credits** — the free tier RATE-LIMITS Gemini
+      (transcription + scoring burn it fast). This is the #1 reliability blocker
+      for full analysis. ~$5 fixes it. Until then, full analysis fails
+      intermittently (but the tool now degrades gracefully — see below).
 - [ ] Preview env vars on Vercel (blocked on outdated CLI) — optional.
+- [ ] Add a login before sharing the site (Saved runs are open to anyone).
+
+## Grab It robustness (2026-07-08)
+
+- **Graceful degradation:** if the AI step fails (rate limit / quota), the
+  scraped comments STILL render (unscored, sorted by likes, "–" badge), with an
+  amber ErrorBanner + Retry (re-runs analysis only, no re-scrape). AI-only
+  sections (ideas/chat/scores) hide until analysis succeeds. Verified live.
+- **Scale:** scrape limit raised to 1000 (`GRAB_IT_COMMENT_LIMIT`); LLM scores
+  the top `GRAB_IT_SCORE_LIMIT` (default 200) by likes, the rest show unscored.
+- **friendlyError()** maps rate-limit/quota errors to actionable copy.
 
 ## Deploy notes (2026-07-08)
 

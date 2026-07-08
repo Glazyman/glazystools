@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Analysis,
   CombinedAnalysis,
-  ScoredComment,
+  ScrapedComment,
   ScrapedPost,
 } from "@/lib/grab-it/types";
 import {
@@ -28,6 +28,39 @@ const PAGE = 5;
 type View = "run" | "saved";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
+
+// Turn raw API errors into something actionable — especially the AI Gateway
+// free-tier rate limit, which is the most common failure.
+function friendlyError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/rate.?limit|rate-limited|too many requests|\b429\b/i.test(msg)) {
+    return "The AI is rate-limited on the Vercel Gateway free tier right now. Your comments are shown below — wait ~30s and hit Retry, or add Gateway credits for unlimited runs.";
+  }
+  if (/free tier|do not have access|no_providers_available|upgrade/i.test(msg)) {
+    return "This needs paid Vercel AI Gateway credits (the free tier blocks/limits it). Your comments are shown below regardless.";
+  }
+  return msg;
+}
+
+function ErrorBanner({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+      <span className="min-w-0 flex-1">{message}</span>
+      <button
+        onClick={onRetry}
+        className="shrink-0 rounded-md border border-amber-500/40 px-3 py-1 text-xs font-medium hover:bg-amber-500/10"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
 
 const MODES: { id: RunMode; label: string; hint: string }[] = [
   { id: "full", label: "Full analysis", hint: "Comments scored + ideas + chat" },
@@ -109,32 +142,52 @@ export function GrabIt() {
         return;
       }
 
-      // Full analysis.
+      // Full analysis — if the AI step fails (e.g. rate limit), we STILL keep
+      // the scraped comments on screen so the run isn't wasted.
       setStage("analyzing");
-      const analyzeRes = await fetch("/api/grab-it/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ post: scrapeData.post }),
-      });
-      const analyzeData = await analyzeRes.json();
-      if (!analyzeRes.ok)
-        throw new Error(analyzeData.error ?? "Analysis failed.");
-      setAnalysis(analyzeData.analysis);
-      setStage("done");
-
-      // Auto-save full runs (they carry the rich data).
-      setSaveState("saving");
       try {
-        await saveRun(scrapeData.post, analyzeData.analysis);
-        setSaveState("saved");
-        refreshSaved();
-      } catch {
-        setSaveState("error");
+        await analyzeAndSave(scrapeData.post);
+      } catch (e) {
+        setError(friendlyError(e));
       }
+      setStage("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(friendlyError(err));
       setStage("error");
     }
+  }
+
+  // Shared analyze + auto-save, reused by run() and the Retry button.
+  async function analyzeAndSave(p: ScrapedPost) {
+    const res = await fetch("/api/grab-it/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ post: p }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Analysis failed.");
+    setAnalysis(data.analysis);
+    setSaveState("saving");
+    try {
+      await saveRun(p, data.analysis);
+      setSaveState("saved");
+      refreshSaved();
+    } catch {
+      setSaveState("error");
+    }
+  }
+
+  // Retry just the AI step against the already-scraped post (no re-scrape).
+  async function retryAnalysis() {
+    if (!post) return run();
+    setError(null);
+    setStage("analyzing");
+    try {
+      await analyzeAndSave(post);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setStage("done");
   }
 
   async function openSaved(id: string) {
@@ -226,13 +279,9 @@ export function GrabIt() {
             <SaveIndicator state={saveState} />
           )}
 
-          {error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-              {error}
-            </div>
-          )}
+          {error && <ErrorBanner message={error} onRetry={retryAnalysis} />}
 
-          {stage === "done" && mode === "full" && analysis && post && (
+          {stage === "done" && mode === "full" && post && (
             <Results post={post} analysis={analysis} />
           )}
           {stage === "done" && mode === "transcript" && post && transcriptOnly && (
@@ -750,38 +799,87 @@ const sortOptions: { key: SortKey; label: string }[] = [
   { key: "replies", label: "Most replies" },
 ];
 
-function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) {
-  const [sortBy, setSortBy] = useState<SortKey>("score");
+type DisplayComment = ScrapedComment & {
+  score?: number;
+  category?: string;
+  reason?: string;
+  replyIdea?: string;
+};
+
+function Results({
+  post,
+  analysis,
+}: {
+  post: ScrapedPost;
+  analysis: Analysis | null;
+}) {
+  const hasAI = !!analysis;
+  const [sortBy, setSortBy] = useState<SortKey>(hasAI ? "score" : "likes");
   const [minScore, setMinScore] = useState(0);
   const [category, setCategory] = useState("all");
   const [visible, setVisible] = useState(PAGE);
-  const [focused, setFocused] = useState<ScoredComment | null>(null);
+  const [focused, setFocused] = useState<DisplayComment | null>(null);
 
-  function askAbout(c: ScoredComment) {
+  function askAbout(c: DisplayComment) {
     setFocused(c);
     document
       .getElementById("grab-chat")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  // Merge AI scores onto EVERY scraped comment (thousands stay visible; only
+  // the top slice gets scored, the rest show unscored and sort by likes).
+  const allComments: DisplayComment[] = useMemo(() => {
+    const byId = new Map(
+      (analysis?.scoredComments ?? []).map((c) => [c.id, c]),
+    );
+    return post.comments.map((c) => {
+      const s = byId.get(c.id);
+      return s
+        ? {
+            ...c,
+            score: s.score,
+            category: s.category,
+            reason: s.reason,
+            replyIdea: s.replyIdea,
+          }
+        : { ...c };
+    });
+  }, [post.comments, analysis]);
+
   const categories = useMemo(
-    () => ["all", ...Array.from(new Set(analysis.scoredComments.map((c) => c.category)))],
-    [analysis.scoredComments],
+    () => [
+      "all",
+      ...Array.from(
+        new Set(
+          allComments
+            .map((c) => c.category)
+            .filter((x): x is string => Boolean(x)),
+        ),
+      ),
+    ],
+    [allComments],
   );
 
   const sorted = useMemo(() => {
-    const filtered = analysis.scoredComments.filter(
-      (c) => c.score >= minScore && (category === "all" || c.category === category),
+    const filtered = allComments.filter(
+      (c) =>
+        (!hasAI || (c.score ?? 0) >= minScore) &&
+        (category === "all" || c.category === category),
     );
-    const key = (c: ScoredComment) =>
-      sortBy === "likes" ? c.likes : sortBy === "replies" ? c.replyCount ?? 0 : c.score;
+    const key = (c: DisplayComment) =>
+      sortBy === "likes"
+        ? c.likes
+        : sortBy === "replies"
+          ? c.replyCount ?? 0
+          : c.score ?? -1; // unscored sink to the bottom when sorting by score
     return [...filtered].sort((a, b) => key(b) - key(a));
-  }, [analysis.scoredComments, sortBy, minScore, category]);
+  }, [allComments, sortBy, minScore, category, hasAI]);
 
-  // Reset pagination whenever the sort/filter changes.
   useEffect(() => setVisible(PAGE), [sortBy, minScore, category]);
-
   const shown = sorted.slice(0, visible);
+  const noun = post.kind === "video" ? "video" : "post";
+  const totalComments = post.commentsCount ?? post.comments.length;
 
   return (
     <div className="space-y-6">
@@ -791,7 +889,7 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
         <span className="rounded bg-elevated px-1.5 py-0.5">
           {KIND_BADGE[post.kind] ?? (post.videoUrl ? "🎥 Video" : "📝 Post")}
         </span>
-        <span>{post.commentsCount ?? post.comments.length} comments</span>
+        <span>{totalComments.toLocaleString()} comments</span>
         {post.likes != null && <span>{post.likes.toLocaleString()} likes</span>}
         <a href={post.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
           view original ↗
@@ -803,13 +901,17 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
         <MediaBlock post={post} />
         <div className="rounded-xl border border-border bg-panel p-5">
           <h3 className="mb-2 text-sm font-semibold text-fg">
-            What this {post.kind === "video" ? "video" : "post"} is about
+            What this {noun} is about
           </h3>
-          <p className="text-sm leading-relaxed text-fg">{analysis.videoSummary}</p>
+          <p className="text-sm leading-relaxed text-fg">
+            {analysis?.videoSummary ?? post.caption ?? "No caption."}
+          </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <span className="inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
-              transcript: {analysis.transcriptSource}
-            </span>
+            {hasAI && (
+              <span className="inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
+                transcript: {analysis!.transcriptSource}
+              </span>
+            )}
             {post.videoUrl && (
               <a
                 href={`/api/grab-it/download?url=${encodeURIComponent(
@@ -824,85 +926,103 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
         </div>
       </div>
 
-      {/* Full transcript — collapsed by default */}
-      <Collapsible title="📄 Full transcript">
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
-          {analysis.transcript?.trim() || "No transcript available for this video."}
-        </p>
-      </Collapsible>
+      {/* AI-only sections */}
+      {hasAI && (
+        <>
+          <Collapsible title="📄 Full transcript">
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
+              {analysis!.transcript?.trim() ||
+                "No transcript available for this video."}
+            </p>
+          </Collapsible>
 
-      {/* Ideas — the main payoff, open by default */}
-      <Collapsible
-        title="💡 Ideas & follow-ups worth making"
-        count={analysis.followUpIdeas.length}
-        accent
-        defaultOpen
-      >
-        <BulletList items={analysis.followUpIdeas} />
-      </Collapsible>
-      <div className="grid gap-4 md:grid-cols-2">
-        <Collapsible
-          title="What people are asking"
-          count={analysis.audienceQuestions.length}
-        >
-          <BulletList items={analysis.audienceQuestions} />
-        </Collapsible>
-        <Collapsible
-          title="What's missing / wanted more"
-          count={analysis.gaps.length}
-        >
-          <BulletList items={analysis.gaps} />
-        </Collapsible>
-      </div>
+          <Collapsible
+            title="💡 Ideas & follow-ups worth making"
+            count={analysis!.followUpIdeas.length}
+            accent
+            defaultOpen
+          >
+            <BulletList items={analysis!.followUpIdeas} />
+          </Collapsible>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Collapsible
+              title="What people are asking"
+              count={analysis!.audienceQuestions.length}
+            >
+              <BulletList items={analysis!.audienceQuestions} />
+            </Collapsible>
+            <Collapsible
+              title="What's missing / wanted more"
+              count={analysis!.gaps.length}
+            >
+              <BulletList items={analysis!.gaps} />
+            </Collapsible>
+          </div>
+        </>
+      )}
 
-      {/* Comments explorer */}
+      {/* Comments explorer — ALWAYS shown, scored or not */}
       <div className="rounded-xl border border-border bg-panel p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-fg">
-            Comments{" "}
-            <span className="text-subtle">({sorted.length})</span>
+            Comments <span className="text-subtle">({sorted.length})</span>
           </h3>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
             <div className="flex overflow-hidden rounded-md border border-border">
-              {sortOptions.map((o) => (
-                <button
-                  key={o.key}
-                  onClick={() => setSortBy(o.key)}
-                  className={`px-2.5 py-1 transition-colors ${
-                    sortBy === o.key
-                      ? "bg-accent text-bg"
-                      : "bg-elevated text-muted hover:text-fg"
-                  }`}
-                >
-                  {o.label}
-                </button>
-              ))}
+              {sortOptions
+                .filter((o) => o.key !== "score" || hasAI)
+                .map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => setSortBy(o.key)}
+                    className={`px-2.5 py-1 transition-colors ${
+                      sortBy === o.key
+                        ? "bg-accent text-bg"
+                        : "bg-elevated text-muted hover:text-fg"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
             </div>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="rounded border border-border bg-elevated px-2 py-1 text-xs text-fg focus:outline-none"
-            >
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c === "all" ? "all categories" : c}
-                </option>
-              ))}
-            </select>
-            <label className="flex items-center gap-1.5">
-              min
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={minScore}
-                onChange={(e) => setMinScore(Number(e.target.value))}
-                className="w-20 accent-[var(--accent)]"
-              />
-              <span className="w-6 tabular-nums text-fg">{minScore}</span>
-            </label>
+            {hasAI && (
+              <>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="rounded border border-border bg-elevated px-2 py-1 text-xs text-fg focus:outline-none"
+                >
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c === "all" ? "all categories" : c}
+                    </option>
+                  ))}
+                </select>
+                <label className="flex items-center gap-1.5">
+                  min
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={minScore}
+                    onChange={(e) => setMinScore(Number(e.target.value))}
+                    className="w-20 accent-[var(--accent)]"
+                  />
+                  <span className="w-6 tabular-nums text-fg">{minScore}</span>
+                </label>
+              </>
+            )}
           </div>
         </div>
+
+        {hasAI &&
+          allComments.some((c) => c.score == null) &&
+          sortBy === "score" && (
+            <p className="mb-3 text-[11px] text-subtle">
+              Top {analysis!.scoredComments.length} most-liked comments are AI-scored;
+              the rest are shown below, sorted by likes.
+            </p>
+          )}
 
         <div className="space-y-2">
           {shown.map((c) => (
@@ -924,23 +1044,23 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
         )}
       </div>
 
-      {/* Ask Claude about the video or a comment */}
-      <ChatPanel
-        post={post}
-        analysis={analysis}
-        focused={focused}
-        onClearFocus={() => setFocused(null)}
-      />
+      {hasAI && (
+        <ChatPanel
+          post={post}
+          analysis={analysis!}
+          focused={focused}
+          onClearFocus={() => setFocused(null)}
+        />
+      )}
 
-      {/* Draft replies — secondary, tucked away */}
-      {analysis.draftComments.length > 0 && (
+      {hasAI && analysis!.draftComments.length > 0 && (
         <details className="rounded-xl border border-border bg-panel p-5">
           <summary className="cursor-pointer text-sm font-semibold text-fg">
             ✍️ Draft replies you could post{" "}
             <span className="font-normal text-subtle">(optional)</span>
           </summary>
           <div className="mt-3 space-y-2">
-            {analysis.draftComments.map((c, i) => (
+            {analysis!.draftComments.map((c, i) => (
               <CopyRow key={i} text={c} />
             ))}
           </div>
@@ -954,14 +1074,23 @@ function CommentCard({
   c,
   onAsk,
 }: {
-  c: ScoredComment;
-  onAsk: (c: ScoredComment) => void;
+  c: DisplayComment;
+  onAsk: (c: DisplayComment) => void;
 }) {
   const [showReply, setShowReply] = useState(false);
   return (
     <div className="rounded-lg border border-border bg-elevated p-3.5">
       <div className="flex items-start gap-3">
-        <ScoreBadge score={c.score} />
+        {c.score != null ? (
+          <ScoreBadge score={c.score} />
+        ) : (
+          <span
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-elevated text-xs text-subtle"
+            title="not scored"
+          >
+            –
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
             <span className="font-medium text-fg">@{c.author}</span>
@@ -969,10 +1098,14 @@ function CommentCard({
             {c.replyCount != null && c.replyCount > 0 && (
               <span>· {c.replyCount} replies</span>
             )}
-            <span className="rounded bg-panel px-1.5 py-0.5">{c.category}</span>
+            {c.category && (
+              <span className="rounded bg-panel px-1.5 py-0.5">{c.category}</span>
+            )}
           </div>
           <p className="mt-1 text-sm text-fg">{c.text}</p>
-          <p className="mt-1 text-xs italic text-subtle">{c.reason}</p>
+          {c.reason && (
+            <p className="mt-1 text-xs italic text-subtle">{c.reason}</p>
+          )}
           <div className="mt-2 flex items-center gap-3">
             <button
               onClick={() => onAsk(c)}
@@ -1017,7 +1150,7 @@ function ChatPanel({
 }: {
   post: ScrapedPost;
   analysis: Analysis;
-  focused: ScoredComment | null;
+  focused: DisplayComment | null;
   onClearFocus: () => void;
 }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);

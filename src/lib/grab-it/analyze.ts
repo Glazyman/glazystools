@@ -12,7 +12,12 @@ const VIDEO_MODEL =
   process.env.GRAB_IT_VIDEO_MODEL ?? "google/gemini-2.5-flash";
 
 const MAX_VIDEO_BYTES = 20 * 1024 * 1024; // 20 MB — inline limit for video parts
-const MAX_COMMENTS_TO_SCORE = 200;
+// How many comments the LLM scores. We can SCRAPE thousands, but scoring every
+// one would be slow and blow through the AI Gateway rate limit — so we score the
+// most-engaged N by likes and show the rest (sorted by likes) unscored.
+const MAX_COMMENTS_TO_SCORE = Number(
+  process.env.GRAB_IT_SCORE_LIMIT ?? 200,
+);
 
 // Free pre-filter: drop comments the model would score ~0 anyway (emoji-only,
 // pure @mention/#hashtag tags, empty). Saves tokens without losing signal —
@@ -135,8 +140,10 @@ export async function transcribePost(post: ScrapedPost): Promise<{
 export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
   const { transcript, transcriptSource } = await transcribePost(post);
 
-  // Drop junk for free, then cap what the model scores.
-  const meaningful = post.comments.filter((c) => !isJunk(c.text));
+  // Drop junk for free, score the most-engaged first, cap what the model sees.
+  const meaningful = post.comments
+    .filter((c) => !isJunk(c.text))
+    .sort((a, b) => b.likes - a.likes);
   const comments = meaningful.slice(0, MAX_COMMENTS_TO_SCORE);
 
   const isVideo = post.kind === "video";
