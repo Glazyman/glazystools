@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   Analysis,
   CombinedAnalysis,
@@ -28,6 +36,32 @@ const PAGE = 5;
 type View = "run" | "saved";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
+
+// Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
+const TOOL_VERSION = "v6";
+
+// If anything inside the results throws at render time, show the error instead
+// of white-screening / hanging the tab.
+class ResultsBoundary extends Component<
+  { children: ReactNode },
+  { error: string | null }
+> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          Display error: {this.state.error} — the run data is safe; try Saved →
+          reopen, and report this message.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // POST JSON with a hard timeout so a hung/slow API call can't freeze the UI.
 async function postJson(
@@ -218,7 +252,7 @@ export function GrabIt() {
   return (
     <div className="space-y-6">
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
+      <div className="flex items-center gap-1 border-b border-border">
         <TabButton active={view === "run"} onClick={() => setView("run")}>
           Run
         </TabButton>
@@ -231,6 +265,9 @@ export function GrabIt() {
         >
           Saved{saved.length > 0 ? ` (${saved.length})` : ""}
         </TabButton>
+        <span className="ml-auto pb-1 text-[10px] text-subtle" title="tool version">
+          {TOOL_VERSION}
+        </span>
       </div>
 
       {view === "run" ? (
@@ -295,13 +332,19 @@ export function GrabIt() {
           {error && <ErrorBanner message={error} onRetry={retryAnalysis} />}
 
           {stage === "done" && mode === "full" && post && (
-            <Results post={post} analysis={analysis} />
+            <ResultsBoundary>
+              <Results post={post} analysis={analysis} />
+            </ResultsBoundary>
           )}
           {stage === "done" && mode === "transcript" && post && transcriptOnly && (
-            <TranscriptView post={post} result={transcriptOnly} />
+            <ResultsBoundary>
+              <TranscriptView post={post} result={transcriptOnly} />
+            </ResultsBoundary>
           )}
           {stage === "done" && mode === "download" && post && (
-            <DownloadView post={post} />
+            <ResultsBoundary>
+              <DownloadView post={post} />
+            </ResultsBoundary>
           )}
 
           {stage === "idle" && <EmptyHint />}
@@ -648,53 +691,46 @@ function deriveShortcode(url: string): string | undefined {
   return url.match(/\/(?:reel|reels|p|tv)\/([^/?#]+)/)?.[1];
 }
 
-// Click-to-play: NOTHING heavy (video file or embed iframe) mounts until the
-// user clicks Play. Auto-loading a large cross-origin Instagram video was
-// freezing the tab (Chrome RESULT_CODE_HUNG), so results now render a light card.
+// Click-to-play, and playback streams through OUR server proxy (same-origin),
+// because Instagram's CDN blocks direct hotlinked <video src> playback and its
+// embed iframe can hang the whole tab (Chrome RESULT_CODE_HUNG). No iframe,
+// nothing heavy mounts until the user clicks Play.
 function VideoPlayer({ post }: { post: ScrapedPost }) {
-  const [mode, setMode] = useState<"idle" | "video" | "embed">("idle");
-  const isInstagram = /instagram\.com/i.test(post.url);
-  const shortcode = post.shortcode ?? deriveShortcode(post.url);
+  const [playing, setPlaying] = useState(false);
+  const [playError, setPlayError] = useState(false);
 
-  if (mode === "video" && post.videoUrl) {
+  const proxied = post.videoUrl
+    ? `/api/grab-it/download?url=${encodeURIComponent(post.videoUrl)}&inline=1`
+    : null;
+
+  if (playing && proxied && !playError) {
     return (
       <video
         controls
         autoPlay
         playsInline
-        preload="metadata"
-        src={post.videoUrl}
-        onError={() =>
-          setMode(isInstagram && shortcode ? "embed" : "idle")
-        }
+        src={proxied}
+        onError={() => setPlayError(true)}
         className="max-h-[460px] w-full rounded-lg bg-black object-contain"
       />
     );
   }
-  if (mode === "embed" && isInstagram && shortcode) {
-    const path = /\/p\//.test(post.url) ? "p" : "reel";
-    return (
-      <iframe
-        title="Instagram player"
-        src={`https://www.instagram.com/${path}/${shortcode}/embed`}
-        className="h-[460px] w-full rounded-lg border border-border bg-black"
-        allowFullScreen
-      />
-    );
-  }
 
-  const canPlayInline = !!post.videoUrl;
-  const canEmbed = isInstagram && !!shortcode;
   return (
     <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-lg border border-border bg-black/40 p-6 text-center">
-      {(canPlayInline || canEmbed) && (
+      {proxied && !playError && (
         <button
-          onClick={() => setMode(canPlayInline ? "video" : "embed")}
+          onClick={() => setPlaying(true)}
           className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-xl text-bg hover:bg-accent-strong"
           aria-label="Play video"
         >
           ▶
         </button>
+      )}
+      {playError && (
+        <p className="text-xs text-amber-300">
+          Playback failed — the source may have expired. Try the original link.
+        </p>
       )}
       <a
         href={post.url}

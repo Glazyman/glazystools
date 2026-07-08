@@ -39,9 +39,14 @@ export async function GET(req: Request) {
       : "mp4";
   const filename = /\.\w{2,4}$/.test(name) ? name : `${name}.${ext}`;
 
+  // ?inline=1 streams for in-page playback (same-origin, so it sidesteps the
+  // CDN hotlink protection that blocks direct <video src> playback).
+  const inline = searchParams.get("inline") === "1";
   const headers: Record<string, string> = {
     "content-type": contentType,
-    "content-disposition": `attachment; filename="${filename}"`,
+    "content-disposition": inline
+      ? "inline"
+      : `attachment; filename="${filename}"`,
   };
   const len = upstream.headers.get("content-length");
   if (len) headers["content-length"] = len;
