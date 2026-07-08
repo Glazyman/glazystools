@@ -36,9 +36,17 @@ obvious.
 
 ## Open questions / next up
 
-- [ ] Add API keys for Grab It (APIFY_TOKEN, AI_GATEWAY_API_KEY) to `.env.local`
-      + Vercel env, then do a live end-to-end test.
+- [ ] Live end-to-end test of Grab It with a real Instagram URL (waiting on Glazy).
 - [ ] Preview env vars on Vercel (blocked on outdated CLI) — optional.
+
+## Auth / keys (verified 2026-07-08)
+
+- **Apify:** `APIFY_TOKEN` set in `.env.local` + Vercel (prod/dev). Account
+  `glazeyman`, FREE plan. Token validated via `/users/me`.
+- **AI Gateway:** No separate key needed! Uses the **Vercel OIDC token**
+  (`VERCEL_OIDC_TOKEN`, pulled via `vercel env pull`) locally, and OIDC
+  automatically in prod. Probed `google/gemini-2.5-flash` → works. Note: local
+  OIDC token expires ~12h; re-run `vercel env pull .env.local` to refresh.
 
 ## Tools
 
