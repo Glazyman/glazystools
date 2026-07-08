@@ -36,7 +36,26 @@ obvious.
 
 ## Open questions / next up
 
-- [ ] Decide which tool to build first (waiting on Glazy).
+- [ ] Add API keys for Grab It (APIFY_TOKEN, AI_GATEWAY_API_KEY) to `.env.local`
+      + Vercel env, then do a live end-to-end test.
+- [ ] Preview env vars on Vercel (blocked on outdated CLI) — optional.
+
+## Tools
+
+### Grab It (`grab-it`) — status: wip
+Paste an Instagram reel/post URL → mine the comments for ideas.
+- **Flow:** Apify scrape (caption, video, all comments) → transcribe video via
+  Gemini (`google/gemini-2.5-flash`) → Claude (`anthropic/claude-sonnet-4.5`)
+  scores every comment 0-100, surfaces questions/gaps, drafts follow-ups + replies.
+- **Files:** `src/lib/grab-it/{types,apify,analyze}.ts`,
+  `src/app/api/grab-it/{scrape,analyze}/route.ts`,
+  `src/app/tools/grab-it/{page,GrabIt}.tsx`.
+- **AI:** Vercel AI SDK v7, models as `provider/model` strings via AI Gateway.
+- **Keys needed:** `APIFY_TOKEN`, `AI_GATEWAY_API_KEY` (Gateway routes both
+  Claude + Gemini). Optional actor overrides: `APIFY_INSTAGRAM_POST_ACTOR`,
+  `APIFY_INSTAGRAM_COMMENT_ACTOR`.
+- **Notes:** comment scoring capped at 200/post; video transcription capped at
+  20 MB (else falls back to caption).
 
 ---
 

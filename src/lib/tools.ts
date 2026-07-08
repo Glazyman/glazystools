@@ -16,17 +16,17 @@ export type Tool = {
 };
 
 export const tools: Tool[] = [
-  // First real tool goes here. Example shape left as a template:
-  // {
-  //   slug: "example",
-  //   name: "Example Tool",
-  //   tagline: "One line on what it does",
-  //   description: "A longer description shown on the tool's own page.",
-  //   icon: "🧩",
-  //   category: "Utilities",
-  //   status: "wip",
-  //   accent: "sky",
-  // },
+  {
+    slug: "grab-it",
+    name: "Grab It",
+    tagline: "Mine a reel's comments for ideas & add-ons",
+    description:
+      "Paste an Instagram reel/post URL. It scrapes the video, caption, and every comment, transcribes what the video says, then Claude scores each comment and hands you the strongest follow-up ideas and value-adding replies to post.",
+    icon: "🎯",
+    category: "Content",
+    status: "wip",
+    accent: "violet",
+  },
 ];
 
 export function getTool(slug: string): Tool | undefined {
