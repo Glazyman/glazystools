@@ -7,7 +7,7 @@ export default function AllTools() {
   const byCat = toolsByCategory();
 
   return (
-    <div className="mx-auto max-w-5xl px-8 py-10">
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
       <h1 className="text-xl font-semibold tracking-tight">All Tools</h1>
       <p className="mt-1.5 text-sm text-muted">
         Everything in the workspace, grouped by category.

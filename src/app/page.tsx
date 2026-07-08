@@ -9,7 +9,7 @@ const statusLabel: Record<string, string> = {
 
 export default function Dashboard() {
   return (
-    <div className="mx-auto max-w-5xl px-8 py-10">
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
       {/* Hero */}
       <div className="mb-10">
         <h1 className="text-2xl font-semibold tracking-tight">

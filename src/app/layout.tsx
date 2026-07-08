@@ -18,6 +18,12 @@ export const metadata: Metadata = {
   description: "A workspace for building and using AI-powered tools.",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#0b0d10",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
