@@ -38,7 +38,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v11";
+const TOOL_VERSION = "v12";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1333,10 +1333,10 @@ function CommentCard({
 type ChatMsg = { role: "user" | "assistant"; content: string };
 
 const SUGGESTIONS = [
-  "Explain what the video says in simple terms",
+  "Explain the top comment in simple terms",
   "What are the video's main points?",
   "What are the best ideas in the comments?",
-  "What are people asking for?",
+  "How would I build one of these ideas?",
   "What should my next video be?",
 ];
 
@@ -1427,7 +1427,9 @@ function ChatPanel({
   return (
     <div>
       <p className="mb-3 text-xs text-muted">
-        Ask anything about the video&apos;s content or the comments.
+        Ask anything — understand the video, dig into a comment, brainstorm, or
+        figure out how to build on an idea. It&apos;ll go beyond the video when
+        you want it to.
       </p>
 
       {messages.length > 0 && (
