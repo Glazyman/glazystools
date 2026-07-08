@@ -17,6 +17,9 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setNavOpen(false), [pathname]);
 
+  // The login page is standalone — no sidebar/top bar chrome.
+  if (pathname === "/login") return <>{children}</>;
+
   return (
     <div className="flex h-dvh w-full overflow-hidden">
       {/* Desktop chrome — hidden on small screens; sidebar can be collapsed */}
