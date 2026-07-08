@@ -126,6 +126,18 @@ Paste an Instagram reel/post URL → mine the comments for ideas.
   `GRAB_IT_ANALYSIS_MODEL=anthropic/claude-sonnet-4.5`.
 - **Cost decisions (2026-07-08):** kept Apify (free $5/mo credits); chose
   Gemini Flash for everything to minimize cost (~1¢/reel vs ~10-15¢ on Sonnet).
+- **ALL COMMENTS, FREE (2026-07-08 ~6am) — the big win:** Instagram/Apify
+  logged-out scraping only returns a small variable batch (15–hundreds). Paid
+  Apify actors cap FREE accounts at 15. SOLUTION: fetch comments straight from
+  Instagram's own web API with a login cookie —
+  `src/lib/grab-it/instagram-direct.ts` converts shortcode→media id and pages
+  `/api/v1/media/{id}/comments/?min_id=<cursor>` with XHR headers
+  (`x-ig-app-id: 936619743392459`, `x-csrftoken`, `x-requested-with`, etc.).
+  Pulled **425/686** comments where Apify gave 15. FREE, and **works from
+  Vercel's datacenter IP** (verified live). Cookie in `INSTAGRAM_COOKIES` env
+  (throwaway account). Gets top-level comments (not nested replies). Falls back
+  to the Apify logged-out actor if cookie missing/expired or IG serves HTML.
+  ~40s for 425 comments (900ms/page pagination delay). Ban risk: throwaway acct.
 - **Files:** `src/lib/grab-it/{types,apify,analyze}.ts`,
   `src/app/api/grab-it/{scrape,analyze}/route.ts`,
   `src/app/tools/grab-it/{page,GrabIt}.tsx`.
