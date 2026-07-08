@@ -49,9 +49,17 @@ obvious.
   scraped comments STILL render (unscored, sorted by likes, "–" badge), with an
   amber ErrorBanner + Retry (re-runs analysis only, no re-scrape). AI-only
   sections (ideas/chat/scores) hide until analysis succeeds. Verified live.
-- **Scale:** scrape limit raised to 1000 (`GRAB_IT_COMMENT_LIMIT`); LLM scores
+- **Scale:** scrape limit `GRAB_IT_COMMENT_LIMIT` (default 500); LLM scores
   the top `GRAB_IT_SCORE_LIMIT` (default 200) by likes, the rest show unscored.
 - **friendlyError()** maps rate-limit/quota errors to actionable copy.
+- **Freeze fix (2026-07-08):** VideoPlayer never auto-loads the IG embed iframe
+  (that was the page-freeze cause); embed is behind a button. Inline `<video>`
+  falls back to a placeholder after a 7s load timeout. Client `postJson` timeouts.
+- **Rate-limit fix (2026-07-08):** full analysis NO LONGER transcribes the video
+  by default (`GRAB_IT_TRANSCRIBE_VIDEO=1` to re-enable). Sending the video to
+  Gemini was the #1 token cost tripping the free-tier limit. Now full analysis =
+  one light call over caption + comments → works on free tier (verified on the
+  DadKkU3 reel). "Transcript only" mode still transcribes the video on demand.
 
 ## Deploy notes (2026-07-08)
 

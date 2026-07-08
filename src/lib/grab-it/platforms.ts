@@ -271,7 +271,7 @@ async function scrapeGeneric(
 // ── dispatcher ───────────────────────────────────────────────────
 export async function scrapePost(
   url: string,
-  commentLimit = Number(process.env.GRAB_IT_COMMENT_LIMIT ?? 1000),
+  commentLimit = Number(process.env.GRAB_IT_COMMENT_LIMIT ?? 500),
 ): Promise<ScrapedPost> {
   switch (detectPlatform(url)) {
     case "instagram":

@@ -136,9 +136,23 @@ export async function transcribePost(post: ScrapedPost): Promise<{
   return { transcript, transcriptSource };
 }
 
+// Sending the whole video to the model for transcription is by far the biggest
+// token cost and the main thing that trips the AI Gateway free-tier rate limit.
+// So full analysis reads the CAPTION + comments by default (light, reliable);
+// set GRAB_IT_TRANSCRIBE_VIDEO=1 to transcribe the video during full analysis.
+// The dedicated "Transcript only" mode always transcribes.
+const TRANSCRIBE_IN_ANALYSIS = process.env.GRAB_IT_TRANSCRIBE_VIDEO === "1";
+
 // Step 3 & 4 — "Read the room" + "Get your ideas".
 export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
-  const { transcript, transcriptSource } = await transcribePost(post);
+  const { transcript, transcriptSource } = TRANSCRIBE_IN_ANALYSIS
+    ? await transcribePost(post)
+    : {
+        transcript: post.caption ?? "",
+        transcriptSource: (post.caption
+          ? "captions"
+          : "unavailable") as Analysis["transcriptSource"],
+      };
 
   // Drop junk for free, score the most-engaged first, cap what the model sees.
   const meaningful = post.comments
