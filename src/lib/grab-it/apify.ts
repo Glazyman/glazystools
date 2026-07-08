@@ -1,3 +1,4 @@
+import { fetchInstagramCommentsDirect } from "./instagram-direct";
 import type { ScrapedComment, ScrapedPost } from "./types";
 
 // Apify client for Instagram. Uses the "run-sync-get-dataset-items" endpoint,
@@ -15,24 +16,21 @@ const POST_ACTOR =
 const COMMENT_ACTOR =
   process.env.APIFY_INSTAGRAM_COMMENT_ACTOR ??
   "apify~instagram-comment-scraper";
-// Authenticated deep-comment actor: with the user's Instagram cookies it pulls
-// ALL comments (the logged-out scraper only sees a small batch). Cheap per
-// comment (~$0.0002). Used only when APIFY_INSTAGRAM_COOKIES is set.
-const DEEP_COMMENT_ACTOR =
-  process.env.APIFY_INSTAGRAM_DEEP_ACTOR ??
-  "louisdeconinck~instagram-comments-scraper";
-
 function token() {
   const t = process.env.APIFY_TOKEN;
   if (!t) throw new Error("APIFY_TOKEN is not set.");
   return t;
 }
 
-// Instagram auth cookies for deep scraping. The deep actor wants a cookie-header
-// STRING ("name=value; name=value"). Accept either a JSON array (from a cookie
-// export extension) or a raw string in APIFY_INSTAGRAM_COOKIES.
+// Instagram auth cookies for direct comment fetching, as a cookie-header STRING
+// ("name=value; …"). Accepts a JSON array (from a cookie-export extension) or a
+// raw string in INSTAGRAM_COOKIES.
 function instagramCookies(): string | null {
-  const raw = process.env.APIFY_INSTAGRAM_COOKIES?.trim();
+  const raw = (
+    process.env.INSTAGRAM_COOKIES ??
+    process.env.APIFY_INSTAGRAM_COOKIES ??
+    ""
+  ).trim();
   if (!raw) return null;
   try {
     const arr = JSON.parse(raw) as { name: string; value: string }[];
@@ -160,42 +158,45 @@ export async function scrapeInstagram(
     ? (post.latestComments as Record<string, unknown>[])
     : [];
 
-  // 2) Comment sweep. With auth cookies, use the deep actor (ALL comments);
-  //    otherwise the logged-out actor (small batch).
-  let commentItems: Record<string, unknown>[] = [];
+  const shortcode = post.shortCode
+    ? String(post.shortCode)
+    : (url.match(/\/(?:reel|reels|p|tv)\/([^/?#]+)/)?.[1] ?? "");
+
+  // 2a) BEST path: with a login cookie, page comments straight from Instagram's
+  //     own web API — free, and pulls far more than the logged-out scraper.
   const cookies = instagramCookies();
-  if (cookies) {
-    try {
-      const deep = await runActor<Record<string, unknown>>(DEEP_COMMENT_ACTOR, {
-        urls: [url],
-        maxComments: commentLimit,
-        cookies,
-      });
-      // The actor emits a {message:"…provide cookies…"} row when auth is
-      // missing/expired — keep only rows that actually carry comment text.
-      commentItems = deep.filter(
-        (c) => c && (c.text ?? c.comment ?? c.body ?? c.commentText),
-      );
-    } catch {
-      commentItems = [];
-    }
+  let direct: ScrapedComment[] = [];
+  if (cookies && shortcode) {
+    direct = await fetchInstagramCommentsDirect(shortcode, cookies, {
+      maxComments: commentLimit,
+      shortcodeUrl: url,
+    });
   }
-  if (commentItems.length === 0) {
+
+  // 2b) Fallback: Apify logged-out comment actor (small batch) if no cookie or
+  //     the direct fetch came back empty (expired cookie / IG blocked the IP).
+  let commentItems: Record<string, unknown>[] = [];
+  if (direct.length === 0) {
     try {
       commentItems = await runActor<Record<string, unknown>>(COMMENT_ACTOR, {
         directUrls: [url],
         resultsLimit: commentLimit,
       });
     } catch {
-      // Fall back to whatever came inline if the comment actor is unavailable.
       commentItems = inlineComments;
     }
   }
 
-  // Merge + dedupe (prefer the fuller sweep, top up with inline).
-  const merged = [...commentItems, ...inlineComments];
+  // Merge + dedupe (direct comments first, then Apify/inline as backup).
   const seen = new Set<string>();
   const comments: ScrapedComment[] = [];
+  for (const c of direct) {
+    const key = `${c.author}:${c.text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    comments.push(c);
+  }
+  const merged = [...commentItems, ...inlineComments];
   merged.forEach((raw, i) => {
     const c = normalizeComment(raw, i);
     if (!c) return;
