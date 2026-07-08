@@ -16,7 +16,7 @@ const MAX_VIDEO_BYTES = 20 * 1024 * 1024; // 20 MB — inline limit for video pa
 // one would be slow and blow through the AI Gateway rate limit — so we score the
 // most-engaged N by likes and show the rest (sorted by likes) unscored.
 const MAX_COMMENTS_TO_SCORE = Number(
-  process.env.GRAB_IT_SCORE_LIMIT ?? 200,
+  process.env.GRAB_IT_SCORE_LIMIT ?? 300,
 );
 
 // Free pre-filter: drop comments the model would score ~0 anyway (emoji-only,
@@ -73,6 +73,11 @@ async function transcribeVideo(
 }
 
 const analysisSchema = z.object({
+  transcript: z
+    .string()
+    .describe(
+      "Verbatim transcript of everything spoken in the attached video (include meaningful on-screen text in [brackets]). Empty string if no video is attached or there is no speech.",
+    ),
   videoSummary: z
     .string()
     .describe("2-4 sentences on what the video is actually about."),
@@ -136,24 +141,33 @@ export async function transcribePost(post: ScrapedPost): Promise<{
   return { transcript, transcriptSource };
 }
 
-// Sending the whole video to the model for transcription is by far the biggest
-// token cost and the main thing that trips the AI Gateway free-tier rate limit.
-// So full analysis reads the CAPTION + comments by default (light, reliable);
-// set GRAB_IT_TRANSCRIBE_VIDEO=1 to transcribe the video during full analysis.
-// The dedicated "Transcript only" mode always transcribes.
-const TRANSCRIBE_IN_ANALYSIS = process.env.GRAB_IT_TRANSCRIBE_VIDEO === "1";
+// Transcribe the video in the SAME call as the analysis (default on). Doing it
+// as one combined request — instead of a separate transcription call followed by
+// an analysis call — halves the rate-limit exposure that was breaking full runs.
+// Set GRAB_IT_TRANSCRIBE_VIDEO=0 to skip the video entirely (caption only).
+const TRANSCRIBE_IN_ANALYSIS = process.env.GRAB_IT_TRANSCRIBE_VIDEO !== "0";
 
-// Step 3 & 4 — "Read the room" + "Get your ideas".
+type VideoFilePart = { type: "file"; mediaType: "video/mp4"; data: Buffer };
+
+// Download the video as an inline file part, or null if unavailable/too big.
+async function loadVideoPart(
+  videoUrl: string,
+): Promise<VideoFilePart | null> {
+  try {
+    const res = await fetch(videoUrl);
+    if (!res.ok) return null;
+    const len = Number(res.headers.get("content-length") ?? 0);
+    if (len && len > MAX_VIDEO_BYTES) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength > MAX_VIDEO_BYTES) return null;
+    return { type: "file", mediaType: "video/mp4", data: buf };
+  } catch {
+    return null;
+  }
+}
+
+// Step 2, 3 & 4 combined — transcribe + read the room + get ideas, in one call.
 export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
-  const { transcript, transcriptSource } = TRANSCRIBE_IN_ANALYSIS
-    ? await transcribePost(post)
-    : {
-        transcript: post.caption ?? "",
-        transcriptSource: (post.caption
-          ? "captions"
-          : "unavailable") as Analysis["transcriptSource"],
-      };
-
   // Drop junk for free, score the most-engaged first, cap what the model sees.
   const meaningful = post.comments
     .filter((c) => !isJunk(c.text))
@@ -161,8 +175,14 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
   const comments = meaningful.slice(0, MAX_COMMENTS_TO_SCORE);
 
   const isVideo = post.kind === "video";
-  const noun = isVideo ? "video" : "post"; // adapt wording to the content type
-  const bodyLabel = isVideo ? "VIDEO TRANSCRIPT" : "POST TEXT";
+  const noun = isVideo ? "video" : "post";
+
+  // Attach the actual video so the model transcribes it in the same request.
+  const videoPart =
+    TRANSCRIBE_IN_ANALYSIS && isVideo && post.videoUrl
+      ? await loadVideoPart(post.videoUrl)
+      : null;
+  const hasVideo = !!videoPart;
 
   const prompt = [
     `You are helping a creator mine the comments on a ${noun} for great ideas and add-ons.`,
@@ -170,9 +190,11 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     `AUTHOR: @${post.author}`,
     `CAPTION: ${post.caption || "(none)"}`,
     ``,
-    transcriptSource === "unavailable"
-      ? `${bodyLabel}: (unavailable — reason about the caption + comments only)`
-      : `${bodyLabel} (${transcriptSource}):\n${transcript}`,
+    hasVideo
+      ? `The ${noun}'s video is attached. First transcribe everything spoken in it into the "transcript" field, then use that transcript (plus the caption + comments) for the rest.`
+      : post.caption
+        ? `No video is attached — use this ${noun}'s text as the "transcript": ${post.caption}`
+        : `No video or text is available — leave "transcript" empty and reason about the comments only.`,
     ``,
     `COMMENTS (${comments.length} of ${post.commentsCount ?? comments.length}) — id | @author | likes | text:`,
     ...comments.map(
@@ -182,17 +204,36 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     `My main goal: mine the comments for good ideas and add-ons — NOT to write replies. Replies are a nice-to-have afterthought.`,
     ``,
     `Tasks:`,
-    `1. Summarize what this ${noun} is really about.`,
+    `1. ${hasVideo ? "Transcribe the video, then summarize" : "Summarize"} what this ${noun} is really about.`,
     `2. Read every comment against the ${noun}. Score each 0-100 on how much value/insight it adds (great add-ons, ideas, corrections, sharp questions score high; spam/emoji/generic praise score low). Return one entry per comment id above.`,
     `3. Pull out the best ideas & add-ons the commenters surfaced (this is the point), plus what people are asking and what's missing.`,
     `4. Only briefly: a few draft replies I could post. Keep this minimal.`,
   ].join("\n");
 
+  const content: Array<
+    { type: "text"; text: string } | VideoFilePart
+  > = hasVideo ? [{ type: "text", text: prompt }, videoPart] : [
+    { type: "text", text: prompt },
+  ];
+
   const { object } = await generateObject({
     model: ANALYSIS_MODEL,
     schema: analysisSchema,
-    prompt,
+    maxRetries: 4, // ride out transient rate limits with backoff
+    messages: [{ role: "user", content }],
   });
+
+  // Resolve the transcript: model output if we sent a video, else the caption.
+  let transcript = object.transcript?.trim() ?? "";
+  let transcriptSource: Analysis["transcriptSource"];
+  if (hasVideo && transcript) {
+    transcriptSource = "video";
+  } else if (post.caption) {
+    transcript = transcript || post.caption;
+    transcriptSource = "captions";
+  } else {
+    transcriptSource = "unavailable";
+  }
 
   // Merge Claude's scores back onto the full comment objects by id.
   const byId = new Map(comments.map((c) => [c.id, c]));

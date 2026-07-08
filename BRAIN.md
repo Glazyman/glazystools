@@ -55,11 +55,19 @@ obvious.
 - **Freeze fix (2026-07-08):** VideoPlayer never auto-loads the IG embed iframe
   (that was the page-freeze cause); embed is behind a button. Inline `<video>`
   falls back to a placeholder after a 7s load timeout. Client `postJson` timeouts.
-- **Rate-limit fix (2026-07-08):** full analysis NO LONGER transcribes the video
-  by default (`GRAB_IT_TRANSCRIBE_VIDEO=1` to re-enable). Sending the video to
-  Gemini was the #1 token cost tripping the free-tier limit. Now full analysis =
-  one light call over caption + comments → works on free tier (verified on the
-  DadKkU3 reel). "Transcript only" mode still transcribes the video on demand.
+- **Combined call (2026-07-08, supersedes the caption-only change):** full
+  analysis now transcribes the video AND analyzes comments in ONE generateObject
+  call (video attached as a file part; schema has a `transcript` field). This
+  halves the rate-limit exposure that two back-to-back Gemini calls caused, and
+  restores the real spoken transcript. `maxRetries: 4` rides out transient
+  limits. `GRAB_IT_TRANSCRIBE_VIDEO=0` disables the video (caption only).
+  Verified: transcriptSource=video, real transcript + 11 scores + 7 ideas in 21s.
+- **Root cause of "google error code 5 / hang":** two sequential Gemini calls
+  (transcribe then analyze) tripped the per-minute limit on the 2nd; transcription
+  errors were also SWALLOWED silently → page hung. Combined call + surfaced errors
+  fix both.
+- **Limits raised:** scrape default 2000 (`GRAB_IT_COMMENT_LIMIT`), score top 300
+  (`GRAB_IT_SCORE_LIMIT`); all scraped comments shown, top 300 AI-scored.
 
 ## Deploy notes (2026-07-08)
 
