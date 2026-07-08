@@ -38,7 +38,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v7";
+const TOOL_VERSION = "v8";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1044,7 +1044,14 @@ function Results({
       <div className="rounded-xl border border-border bg-panel p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-fg">
-            Comments <span className="text-subtle">({sorted.length})</span>
+            Comments{" "}
+            <span className="text-subtle">
+              ({post.comments.length.toLocaleString()}
+              {totalComments > post.comments.length
+                ? ` of ${totalComments.toLocaleString()}`
+                : ""}
+              )
+            </span>
           </h3>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
             <div className="flex overflow-hidden rounded-md border border-border">
@@ -1094,12 +1101,21 @@ function Results({
           </div>
         </div>
 
+        {totalComments > post.comments.length + 5 && (
+          <p className="mb-3 text-[11px] text-amber-300/80">
+            Instagram only exposed {post.comments.length.toLocaleString()} of ~
+            {totalComments.toLocaleString()} comments to the scraper for this post
+            (it varies per post — some allow thousands, some only a handful). All
+            scraped comments are shown here.
+          </p>
+        )}
+
         {hasAI &&
           allComments.some((c) => c.score == null) &&
           sortBy === "score" && (
             <p className="mb-3 text-[11px] text-subtle">
-              Top {analysis!.scoredComments.length} most-liked comments are AI-scored;
-              the rest are shown below, sorted by likes.
+              The {analysis!.scoredComments.length} most-liked comments are
+              AI-scored; the rest are shown below (sorted by likes).
             </p>
           )}
 
