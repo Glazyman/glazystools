@@ -52,9 +52,20 @@ obvious.
 - **Scale:** scrape limit `GRAB_IT_COMMENT_LIMIT` (default 500); LLM scores
   the top `GRAB_IT_SCORE_LIMIT` (default 200) by likes, the rest show unscored.
 - **friendlyError()** maps rate-limit/quota errors to actionable copy.
-- **Freeze fix (2026-07-08):** VideoPlayer never auto-loads the IG embed iframe
-  (that was the page-freeze cause); embed is behind a button. Inline `<video>`
-  falls back to a placeholder after a 7s load timeout. Client `postJson` timeouts.
+- **THE REAL FREEZE ROOT CAUSE (found v7, 2026-07-08 ~5:30am):** a
+  `replace_all` edit that renamed `<VideoPlayer>` → `<MediaBlock>` at call sites
+  ALSO rewrote the call **inside MediaBlock itself** → MediaBlock recursed
+  infinitely for every `kind:"video"` post → renderer hang → Chrome
+  RESULT_CODE_HUNG. Text posts skipped the branch (why only video posts froze).
+  Side-effect that confirmed it: VideoPlayer got tree-shaken out of the bundle
+  (nothing referenced it). LESSON: never `replace_all` a component call — the
+  recursive call site inside the wrapper gets hit too. Fixed + verified live on
+  a video post (v7 badge, full render, no freeze).
+- **v6/v7 hardening (kept):** video plays through `/api/grab-it/download?...&inline=1`
+  (same-origin proxy — IG CDN blocks hotlinked playback); IG embed iframe REMOVED
+  entirely (it can hang tabs); click-to-play (nothing mounts till Play);
+  ResultsBoundary error boundary; `TOOL_VERSION` badge by the tabs to detect
+  stale cached JS; client `postJson` timeouts.
 - **Combined call (2026-07-08, supersedes the caption-only change):** full
   analysis now transcribes the video AND analyzes comments in ONE generateObject
   call (video attached as a file part; schema has a `transcript` field). This
