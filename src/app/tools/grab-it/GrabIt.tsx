@@ -27,14 +27,30 @@ const PAGE = 5;
 
 type View = "run" | "saved";
 type SaveState = "idle" | "saving" | "saved" | "error";
+type RunMode = "full" | "transcript" | "download";
+
+const MODES: { id: RunMode; label: string; hint: string }[] = [
+  { id: "full", label: "Full analysis", hint: "Comments scored + ideas + chat" },
+  { id: "transcript", label: "Transcript only", hint: "Just what the video says" },
+  { id: "download", label: "Download video", hint: "Grab the video file" },
+];
+
+type TranscriptResult = {
+  transcript: string;
+  transcriptSource: Analysis["transcriptSource"];
+};
 
 export function GrabIt() {
   const [view, setView] = useState<View>("run");
+  const [mode, setMode] = useState<RunMode>("full");
   const [url, setUrl] = useState("");
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
   const [post, setPost] = useState<ScrapedPost | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [transcriptOnly, setTranscriptOnly] = useState<TranscriptResult | null>(
+    null,
+  );
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saved, setSaved] = useState<RunMeta[]>([]);
   const [savedLoading, setSavedLoading] = useState(true);
@@ -58,6 +74,7 @@ export function GrabIt() {
     setError(null);
     setPost(null);
     setAnalysis(null);
+    setTranscriptOnly(null);
     setSaveState("idle");
     setView("run");
     setStage("scraping");
@@ -71,6 +88,28 @@ export function GrabIt() {
       if (!scrapeRes.ok) throw new Error(scrapeData.error ?? "Scrape failed.");
       setPost(scrapeData.post);
 
+      // Download mode: we already have the video URL, nothing more to do.
+      if (mode === "download") {
+        setStage("done");
+        return;
+      }
+
+      // Transcript-only mode: just get the words.
+      if (mode === "transcript") {
+        setStage("analyzing");
+        const res = await fetch("/api/grab-it/transcribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ post: scrapeData.post }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Transcription failed.");
+        setTranscriptOnly(data);
+        setStage("done");
+        return;
+      }
+
+      // Full analysis.
       setStage("analyzing");
       const analyzeRes = await fetch("/api/grab-it/analyze", {
         method: "POST",
@@ -83,7 +122,7 @@ export function GrabIt() {
       setAnalysis(analyzeData.analysis);
       setStage("done");
 
-      // Auto-save every completed run.
+      // Auto-save full runs (they carry the rich data).
       setSaveState("saving");
       try {
         await saveRun(scrapeData.post, analyzeData.analysis);
@@ -130,12 +169,30 @@ export function GrabIt() {
 
       {view === "run" ? (
         <>
+          {/* Mode selector */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {MODES.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setMode(m.id)}
+                className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                  mode === m.id
+                    ? "border-accent bg-accent/10"
+                    : "border-border bg-elevated hover:border-border-strong"
+                }`}
+              >
+                <div className="text-sm font-medium text-fg">{m.label}</div>
+                <div className="text-[11px] text-subtle">{m.hint}</div>
+              </button>
+            ))}
+          </div>
+
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && url && !busy && run()}
-              placeholder="https://www.instagram.com/reel/…"
+              placeholder="Paste a link — Instagram, TikTok, Reddit, X, Facebook, YouTube…"
               className="flex-1 rounded-lg border border-border bg-elevated px-3.5 py-2.5 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
             />
             <button
@@ -143,13 +200,31 @@ export function GrabIt() {
               disabled={!url || busy}
               className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {busy ? "Working…" : "Grab it"}
+              {busy
+                ? "Working…"
+                : mode === "download"
+                  ? "Get video"
+                  : mode === "transcript"
+                    ? "Transcribe"
+                    : "Grab it"}
             </button>
           </div>
+          <p className="text-[11px] text-subtle">
+            Works with Instagram, TikTok, Reddit, X/Twitter, Facebook &amp;
+            YouTube. Instagram is fully tested; the others are newly added.
+          </p>
 
-          {stage !== "idle" && <StageBar stage={stage} />}
+          {mode === "full" && stage !== "idle" && <StageBar stage={stage} />}
+          {mode !== "full" && busy && (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-panel p-4 text-sm text-muted">
+              <Spinner />
+              {stage === "scraping" ? "Fetching the video…" : "Transcribing…"}
+            </div>
+          )}
 
-          {stage === "done" && <SaveIndicator state={saveState} />}
+          {stage === "done" && mode === "full" && (
+            <SaveIndicator state={saveState} />
+          )}
 
           {error && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -157,7 +232,15 @@ export function GrabIt() {
             </div>
           )}
 
-          {analysis && post && <Results post={post} analysis={analysis} />}
+          {stage === "done" && mode === "full" && analysis && post && (
+            <Results post={post} analysis={analysis} />
+          )}
+          {stage === "done" && mode === "transcript" && post && transcriptOnly && (
+            <TranscriptView post={post} result={transcriptOnly} />
+          )}
+          {stage === "done" && mode === "download" && post && (
+            <DownloadView post={post} />
+          )}
 
           {stage === "idle" && <EmptyHint />}
         </>
@@ -541,6 +624,89 @@ function VideoPlayer({ post }: { post: ScrapedPost }) {
   );
 }
 
+function DownloadButton({ post }: { post: ScrapedPost }) {
+  if (!post.videoUrl) {
+    return (
+      <p className="text-xs text-subtle">
+        No direct video file available for this link (some platforms don&apos;t
+        expose one).
+      </p>
+    );
+  }
+  const href = `/api/grab-it/download?url=${encodeURIComponent(
+    post.videoUrl,
+  )}&name=${encodeURIComponent(`${post.author}-video`)}`;
+  return (
+    <a
+      href={href}
+      className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg transition-colors hover:bg-accent-strong"
+    >
+      ⬇ Download video
+    </a>
+  );
+}
+
+function DownloadView({ post }: { post: ScrapedPost }) {
+  return (
+    <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
+      <VideoPlayer post={post} />
+      <div className="space-y-3 rounded-xl border border-border bg-panel p-5">
+        <div className="text-sm">
+          <span className="font-medium text-fg">@{post.author}</span>
+          {post.caption && (
+            <p className="mt-1 line-clamp-3 text-xs text-muted">
+              {post.caption}
+            </p>
+          )}
+        </div>
+        <DownloadButton post={post} />
+        <a
+          href={post.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-xs text-accent hover:underline"
+        >
+          open original ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function TranscriptView({
+  post,
+  result,
+}: {
+  post: ScrapedPost;
+  result: TranscriptResult;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
+        <VideoPlayer post={post} />
+        <div className="space-y-3 rounded-xl border border-border bg-panel p-5">
+          <div className="text-sm">
+            <span className="font-medium text-fg">@{post.author}</span>
+          </div>
+          <span className="inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
+            source: {result.transcriptSource}
+          </span>
+          <div>
+            <DownloadButton post={post} />
+          </div>
+        </div>
+      </div>
+      <div className="rounded-xl border border-border bg-panel p-5">
+        <h3 className="mb-2 text-sm font-semibold text-fg">📄 Transcript</h3>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
+          {result.transcript?.trim() ||
+            "No transcript could be produced for this video."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 type SortKey = "score" | "likes" | "replies";
 const sortOptions: { key: SortKey; label: string }[] = [
   { key: "score", label: "Top scored" },
@@ -599,9 +765,21 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
         <div className="rounded-xl border border-border bg-panel p-5">
           <h3 className="mb-2 text-sm font-semibold text-fg">What the video is about</h3>
           <p className="text-sm leading-relaxed text-fg">{analysis.videoSummary}</p>
-          <span className="mt-3 inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
-            transcript: {analysis.transcriptSource}
-          </span>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <span className="inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
+              transcript: {analysis.transcriptSource}
+            </span>
+            {post.videoUrl && (
+              <a
+                href={`/api/grab-it/download?url=${encodeURIComponent(
+                  post.videoUrl,
+                )}&name=${encodeURIComponent(`${post.author}-video`)}`}
+                className="text-xs text-accent hover:underline"
+              >
+                ⬇ download video
+              </a>
+            )}
+          </div>
         </div>
       </div>
 

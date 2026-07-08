@@ -22,7 +22,7 @@ function token() {
   return t;
 }
 
-async function runActor<T = Record<string, unknown>>(
+export async function runActor<T = Record<string, unknown>>(
   actor: string,
   input: Record<string, unknown>,
 ): Promise<T[]> {
@@ -43,23 +43,47 @@ async function runActor<T = Record<string, unknown>>(
   return (await res.json()) as T[];
 }
 
-// Normalize whatever shape the comment actors return into ScrapedComment.
-function normalizeComment(
+// Normalize whatever shape a comment actor returns into ScrapedComment.
+// Handles the many field-name variants across platforms defensively.
+export function normalizeComment(
   raw: Record<string, unknown>,
   i: number,
 ): ScrapedComment | null {
-  const text = String(raw.text ?? raw.comment ?? "").trim();
+  const text = String(
+    raw.text ?? raw.comment ?? raw.body ?? raw.commentText ?? raw.content ?? "",
+  ).trim();
   if (!text) return null;
   return {
-    id: String(raw.id ?? raw.commentId ?? `c${i}`),
+    id: String(raw.id ?? raw.commentId ?? raw.cid ?? `c${i}`),
     text,
     author: String(
-      raw.ownerUsername ?? raw.owner_username ?? raw.username ?? "unknown",
+      raw.ownerUsername ??
+        raw.owner_username ??
+        raw.username ??
+        raw.author ??
+        raw.uniqueId ??
+        raw.name ??
+        "unknown",
     ),
-    likes: Number(raw.likesCount ?? raw.likes_count ?? raw.likes ?? 0) || 0,
-    timestamp: raw.timestamp ? String(raw.timestamp) : undefined,
+    likes:
+      Number(
+        raw.likesCount ??
+          raw.likes_count ??
+          raw.likes ??
+          raw.diggCount ??
+          raw.upVotes ??
+          raw.upvotes ??
+          raw.voteCount ??
+          0,
+      ) || 0,
+    timestamp: raw.timestamp
+      ? String(raw.timestamp)
+      : raw.createdAt
+        ? String(raw.createdAt)
+        : undefined,
     replyCount:
-      Number(raw.repliesCount ?? raw.replies_count ?? 0) || undefined,
+      Number(raw.repliesCount ?? raw.replies_count ?? raw.replyCount ?? 0) ||
+      undefined,
   };
 }
 

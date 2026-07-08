@@ -110,9 +110,11 @@ const analysisSchema = z.object({
   ),
 });
 
-// Step 3 & 4 — "Read the room" + "Get your ideas".
-export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
-  // Resolve the transcript.
+// Step 2 alone — resolve just the transcript (used by "transcript only" mode).
+export async function transcribePost(post: ScrapedPost): Promise<{
+  transcript: string;
+  transcriptSource: Analysis["transcriptSource"];
+}> {
   let transcript = "";
   let transcriptSource: Analysis["transcriptSource"] = "unavailable";
   if (post.videoUrl) {
@@ -126,6 +128,12 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     transcript = post.caption;
     transcriptSource = "captions";
   }
+  return { transcript, transcriptSource };
+}
+
+// Step 3 & 4 — "Read the room" + "Get your ideas".
+export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
+  const { transcript, transcriptSource } = await transcribePost(post);
 
   // Drop junk for free, then cap what the model scores.
   const meaningful = post.comments.filter((c) => !isJunk(c.text));

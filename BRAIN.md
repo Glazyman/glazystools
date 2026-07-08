@@ -119,6 +119,16 @@ Paste an Instagram reel/post URL → mine the comments for ideas.
 - **Real pipeline confirmed working:** Glazy ran it on a real reel
   (techno.optimist.prime, 785 comments scraped) — Apify + analysis + save all
   succeeded end-to-end.
+- **Multi-platform (2026-07-08):** `src/lib/grab-it/platforms.ts` detects the
+  platform from the URL and dispatches to an Apify actor per platform:
+  Instagram (tested), TikTok, Reddit, X, Facebook, YouTube (best-effort, standard
+  actors + defensive parsing — may need per-platform tweaks; actor ids
+  overridable via env e.g. `APIFY_TIKTOK_ACTOR`). LinkedIn/Nextdoor detected but
+  require `APIFY_LINKEDIN_ACTOR`/`APIFY_NEXTDOOR_ACTOR` to enable.
+- **Run modes (2026-07-08):** Full analysis / Transcript only / Download video.
+  Transcript uses `/api/grab-it/transcribe` (reuses `transcribePost`); Download
+  streams via `/api/grab-it/download` proxy (forces attachment; SSRF guard blocks
+  localhost/private IPs — verified). Only full runs auto-save.
 
 ---
 
