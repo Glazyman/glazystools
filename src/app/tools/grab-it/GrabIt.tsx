@@ -1,15 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { Analysis, ScrapedPost } from "@/lib/grab-it/types";
+import { useEffect, useMemo, useState } from "react";
+import type { Analysis, ScoredComment, ScrapedPost } from "@/lib/grab-it/types";
 
 type Stage = "idle" | "scraping" | "analyzing" | "done" | "error";
 
 const stageSteps = [
   { key: "scraping", label: "Grab it", detail: "Scraping video, caption & comments" },
   { key: "analyzing", label: "Understand & read the room", detail: "Transcribing + scoring every comment" },
-  { key: "done", label: "Your ideas", detail: "Follow-ups & value-adding replies" },
+  { key: "done", label: "Ideas & comments", detail: "Ready to explore" },
 ] as const;
+
+const PAGE = 5;
 
 export function GrabIt() {
   const [url, setUrl] = useState("");
@@ -54,8 +56,7 @@ export function GrabIt() {
 
   return (
     <div className="space-y-6">
-      {/* Input */}
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -72,10 +73,7 @@ export function GrabIt() {
         </button>
       </div>
 
-      {/* Stage progress */}
-      {stage !== "idle" && (
-        <StageBar stage={stage} />
-      )}
+      {stage !== "idle" && <StageBar stage={stage} />}
 
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -83,7 +81,6 @@ export function GrabIt() {
         </div>
       )}
 
-      {/* Results */}
       {analysis && post && <Results post={post} analysis={analysis} />}
 
       {stage === "idle" && <EmptyHint />}
@@ -113,14 +110,10 @@ function StageBar({ stage }: { stage: Stage }) {
               {done ? "✓" : active ? <Spinner /> : i + 1}
             </span>
             <div className="min-w-0">
-              <div
-                className={`text-sm ${active || done ? "text-fg" : "text-subtle"}`}
-              >
+              <div className={`text-sm ${active || done ? "text-fg" : "text-subtle"}`}>
                 {s.label}
               </div>
-              {active && (
-                <div className="text-[11px] text-muted">{s.detail}</div>
-              )}
+              {active && <div className="text-[11px] text-muted">{s.detail}</div>}
             </div>
           </div>
         );
@@ -135,75 +128,138 @@ function Spinner() {
   );
 }
 
+function deriveShortcode(url: string): string | undefined {
+  return url.match(/\/(?:reel|reels|p|tv)\/([^/?#]+)/)?.[1];
+}
+
+function VideoPlayer({ post }: { post: ScrapedPost }) {
+  const [failed, setFailed] = useState(false);
+  const shortcode = post.shortcode ?? deriveShortcode(post.url);
+
+  if (post.videoUrl && !failed) {
+    return (
+      <video
+        controls
+        playsInline
+        poster={post.displayUrl}
+        onError={() => setFailed(true)}
+        src={post.videoUrl}
+        className="max-h-[460px] w-full rounded-lg bg-black object-contain"
+      />
+    );
+  }
+  if (shortcode) {
+    return (
+      <iframe
+        title="Instagram video"
+        src={`https://www.instagram.com/reel/${shortcode}/embed`}
+        className="h-[460px] w-full rounded-lg border border-border bg-black"
+        allowFullScreen
+      />
+    );
+  }
+  return (
+    <a
+      href={post.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex h-40 items-center justify-center rounded-lg border border-dashed border-border-strong text-sm text-muted"
+    >
+      Open on Instagram ↗
+    </a>
+  );
+}
+
+type SortKey = "score" | "likes" | "replies";
+const sortOptions: { key: SortKey; label: string }[] = [
+  { key: "score", label: "Top scored" },
+  { key: "likes", label: "Most likes" },
+  { key: "replies", label: "Most replies" },
+];
+
 function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) {
+  const [sortBy, setSortBy] = useState<SortKey>("score");
   const [minScore, setMinScore] = useState(0);
-  const [category, setCategory] = useState<string>("all");
+  const [category, setCategory] = useState("all");
+  const [visible, setVisible] = useState(PAGE);
 
   const categories = useMemo(
     () => ["all", ...Array.from(new Set(analysis.scoredComments.map((c) => c.category)))],
     [analysis.scoredComments],
   );
 
-  const visible = analysis.scoredComments.filter(
-    (c) => c.score >= minScore && (category === "all" || c.category === category),
-  );
+  const sorted = useMemo(() => {
+    const filtered = analysis.scoredComments.filter(
+      (c) => c.score >= minScore && (category === "all" || c.category === category),
+    );
+    const key = (c: ScoredComment) =>
+      sortBy === "likes" ? c.likes : sortBy === "replies" ? c.replyCount ?? 0 : c.score;
+    return [...filtered].sort((a, b) => key(b) - key(a));
+  }, [analysis.scoredComments, sortBy, minScore, category]);
+
+  // Reset pagination whenever the sort/filter changes.
+  useEffect(() => setVisible(PAGE), [sortBy, minScore, category]);
+
+  const shown = sorted.slice(0, visible);
 
   return (
     <div className="space-y-6">
-      {/* Post meta */}
+      {/* Meta */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
-        <span>@{post.author}</span>
+        <span className="font-medium text-fg">@{post.author}</span>
         <span>{post.commentsCount ?? post.comments.length} comments</span>
         {post.likes != null && <span>{post.likes.toLocaleString()} likes</span>}
-        <span className="rounded bg-elevated px-1.5 py-0.5">
-          transcript: {analysis.transcriptSource}
-        </span>
+        <a href={post.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+          view on Instagram ↗
+        </a>
       </div>
 
-      {/* What the video is about */}
-      <Section title="What the video is about">
-        <p className="text-sm leading-relaxed text-fg">{analysis.videoSummary}</p>
-      </Section>
-
-      {/* Read the room */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <ListCard title="What people are asking" items={analysis.audienceQuestions} />
-        <ListCard title="What's missing" items={analysis.gaps} />
+      {/* Video + what it's about */}
+      <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
+        <VideoPlayer post={post} />
+        <div className="rounded-xl border border-border bg-panel p-5">
+          <h3 className="mb-2 text-sm font-semibold text-fg">What the video is about</h3>
+          <p className="text-sm leading-relaxed text-fg">{analysis.videoSummary}</p>
+          <span className="mt-3 inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
+            transcript: {analysis.transcriptSource}
+          </span>
+        </div>
       </div>
 
-      {/* Ideas */}
+      {/* Ideas — the main payoff */}
       <ListCard
-        title="💡 Strong follow-ups & add-ons"
+        title="💡 Ideas & follow-ups worth making"
         items={analysis.followUpIdeas}
         accent
       />
+      <div className="grid gap-4 md:grid-cols-2">
+        <ListCard title="What people are asking" items={analysis.audienceQuestions} />
+        <ListCard title="What's missing / wanted more" items={analysis.gaps} />
+      </div>
 
-      {/* Draft comments */}
-      <Section title="✍️ Draft comments you could post">
-        <div className="space-y-2">
-          {analysis.draftComments.map((c, i) => (
-            <CopyRow key={i} text={c} />
-          ))}
-        </div>
-      </Section>
-
-      {/* Scored comments */}
-      <Section
-        title={`Scored comments (${visible.length})`}
-        controls={
-          <div className="flex items-center gap-3 text-xs text-muted">
-            <label className="flex items-center gap-1.5">
-              min score
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={minScore}
-                onChange={(e) => setMinScore(Number(e.target.value))}
-                className="accent-[var(--accent)]"
-              />
-              <span className="w-6 tabular-nums text-fg">{minScore}</span>
-            </label>
+      {/* Comments explorer */}
+      <div className="rounded-xl border border-border bg-panel p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-fg">
+            Comments{" "}
+            <span className="text-subtle">({sorted.length})</span>
+          </h3>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+            <div className="flex overflow-hidden rounded-md border border-border">
+              {sortOptions.map((o) => (
+                <button
+                  key={o.key}
+                  onClick={() => setSortBy(o.key)}
+                  className={`px-2.5 py-1 transition-colors ${
+                    sortBy === o.key
+                      ? "bg-accent text-bg"
+                      : "bg-elevated text-muted hover:text-fg"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
@@ -211,46 +267,97 @@ function Results({ post, analysis }: { post: ScrapedPost; analysis: Analysis }) 
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {c === "all" ? "all categories" : c}
                 </option>
               ))}
             </select>
+            <label className="flex items-center gap-1.5">
+              min
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+                className="w-20 accent-[var(--accent)]"
+              />
+              <span className="w-6 tabular-nums text-fg">{minScore}</span>
+            </label>
           </div>
-        }
-      >
+        </div>
+
         <div className="space-y-2">
-          {visible.map((c) => (
-            <div
-              key={c.id}
-              className="rounded-lg border border-border bg-elevated p-3.5"
-            >
-              <div className="flex items-start gap-3">
-                <ScoreBadge score={c.score} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-xs text-muted">
-                    <span className="font-medium text-fg">@{c.author}</span>
-                    <span>· {c.likes} likes</span>
-                    <span className="rounded bg-panel px-1.5 py-0.5">
-                      {c.category}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-fg">{c.text}</p>
-                  <p className="mt-1 text-xs italic text-subtle">{c.reason}</p>
-                  {c.replyIdea && (
-                    <div className="mt-2 rounded-md border border-accent/20 bg-accent/5 p-2 text-xs text-fg">
-                      <span className="text-accent">Reply idea: </span>
-                      {c.replyIdea}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+          {shown.map((c) => (
+            <CommentCard key={c.id} c={c} />
           ))}
-          {visible.length === 0 && (
+          {sorted.length === 0 && (
             <p className="text-sm text-subtle">No comments match this filter.</p>
           )}
         </div>
-      </Section>
+
+        {visible < sorted.length && (
+          <button
+            onClick={() => setVisible((v) => v + PAGE)}
+            className="mt-4 w-full rounded-lg border border-border bg-elevated py-2.5 text-sm text-muted transition-colors hover:bg-hover hover:text-fg"
+          >
+            Load {Math.min(PAGE, sorted.length - visible)} more
+            <span className="text-subtle"> ({sorted.length - visible} left)</span>
+          </button>
+        )}
+      </div>
+
+      {/* Draft replies — secondary, tucked away */}
+      {analysis.draftComments.length > 0 && (
+        <details className="rounded-xl border border-border bg-panel p-5">
+          <summary className="cursor-pointer text-sm font-semibold text-fg">
+            ✍️ Draft replies you could post{" "}
+            <span className="font-normal text-subtle">(optional)</span>
+          </summary>
+          <div className="mt-3 space-y-2">
+            {analysis.draftComments.map((c, i) => (
+              <CopyRow key={i} text={c} />
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function CommentCard({ c }: { c: ScoredComment }) {
+  const [showReply, setShowReply] = useState(false);
+  return (
+    <div className="rounded-lg border border-border bg-elevated p-3.5">
+      <div className="flex items-start gap-3">
+        <ScoreBadge score={c.score} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+            <span className="font-medium text-fg">@{c.author}</span>
+            <span>· {c.likes} likes</span>
+            {c.replyCount != null && c.replyCount > 0 && (
+              <span>· {c.replyCount} replies</span>
+            )}
+            <span className="rounded bg-panel px-1.5 py-0.5">{c.category}</span>
+          </div>
+          <p className="mt-1 text-sm text-fg">{c.text}</p>
+          <p className="mt-1 text-xs italic text-subtle">{c.reason}</p>
+          {c.replyIdea && (
+            <div className="mt-2">
+              <button
+                onClick={() => setShowReply((s) => !s)}
+                className="text-xs text-accent hover:underline"
+              >
+                {showReply ? "hide reply idea" : "💬 reply idea"}
+              </button>
+              {showReply && (
+                <div className="mt-1.5 rounded-md border border-accent/20 bg-accent/5 p-2 text-xs text-fg">
+                  {c.replyIdea}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -265,29 +372,10 @@ function ScoreBadge({ score }: { score: number }) {
   return (
     <span
       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold tabular-nums ${color}`}
+      title="value score"
     >
       {score}
     </span>
-  );
-}
-
-function Section({
-  title,
-  children,
-  controls,
-}: {
-  title: string;
-  children: React.ReactNode;
-  controls?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-panel p-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-fg">{title}</h3>
-        {controls}
-      </div>
-      {children}
-    </div>
   );
 }
 
@@ -346,8 +434,8 @@ function EmptyHint() {
     <div className="grid-bg rounded-xl border border-dashed border-border-strong px-6 py-14 text-center">
       <p className="text-sm text-muted">
         Paste an Instagram reel or post URL above and hit{" "}
-        <span className="text-fg">Grab it</span>. You&apos;ll get a transcript,
-        every comment scored for value, and ready-to-post ideas.
+        <span className="text-fg">Grab it</span>. You&apos;ll get the video, the
+        best ideas from the comments, and every comment scored — top ones first.
       </p>
     </div>
   );

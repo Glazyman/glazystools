@@ -79,11 +79,13 @@ const analysisSchema = z.object({
     .describe("What the video left out or what people want more of."),
   followUpIdeas: z
     .array(z.string())
-    .describe("Strong follow-up videos or add-ons that would land well."),
+    .describe(
+      "The best ideas, add-ons, and improvements surfaced BY the commenters (or clearly implied by what they're asking) — the gold worth mining. Prioritize concrete ideas people actually raised over generic suggestions.",
+    ),
   draftComments: z
     .array(z.string())
     .describe(
-      "Ready-to-post comments/replies that add real value the audience is looking for.",
+      "Secondary: a few ready-to-post replies that add value. Keep this short — replies are not the main goal.",
     ),
   scoredComments: z.array(
     z.object({
@@ -144,11 +146,13 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
       (c) => `${c.id} | @${c.author} | ${c.likes} | ${c.text.replace(/\n/g, " ")}`,
     ),
     ``,
+    `My main goal: mine the comments for good ideas and add-ons — NOT to write replies. Replies are a nice-to-have afterthought.`,
+    ``,
     `Tasks:`,
     `1. Summarize what the video is really about.`,
-    `2. Read every comment against the video. Score each one 0-100 on how much value it adds (great add-ons, ideas, corrections, sharp questions score high; spam/emoji/generic praise score low). Return one entry per comment id above.`,
-    `3. Tell me what people are asking, what's missing, and the strongest follow-ups/add-ons.`,
-    `4. Draft comments/replies I could post that add the value people want.`,
+    `2. Read every comment against the video. Score each 0-100 on how much value/insight it adds (great add-ons, ideas, corrections, sharp questions score high; spam/emoji/generic praise score low). Return one entry per comment id above.`,
+    `3. Pull out the best ideas & add-ons the commenters surfaced (this is the point), plus what people are asking and what's missing.`,
+    `4. Only briefly: a few draft replies I could post. Keep this minimal.`,
   ].join("\n");
 
   const { object } = await generateObject({

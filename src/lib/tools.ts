@@ -21,7 +21,7 @@ export const tools: Tool[] = [
     name: "Grab It",
     tagline: "Mine a reel's comments for ideas & add-ons",
     description:
-      "Paste an Instagram reel/post URL. It scrapes the video, caption, and every comment, transcribes what the video says, then Claude scores each comment and hands you the strongest follow-up ideas and value-adding replies to post.",
+      "Paste an Instagram reel/post URL. It scrapes the video, caption, and every comment, transcribes what the video says, then surfaces the best ideas and add-ons from the comments — every comment scored and sortable, top ones first.",
     icon: "🎯",
     category: "Content",
     status: "wip",

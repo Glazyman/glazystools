@@ -83,6 +83,13 @@ Paste an Instagram reel/post URL → mine the comments for ideas.
   `APIFY_INSTAGRAM_COMMENT_ACTOR`.
 - **Notes:** comment scoring capped at 200/post; video transcription capped at
   20 MB (else falls back to caption).
+- **UX (2026-07-08 revamp):** primary goal is exploring comments + mining ideas;
+  replies are secondary (per-comment reply idea is a collapsed toggle, bulk
+  drafts in a `<details>` at the bottom). Comments show top-scored first, 5 at a
+  time with "Load more"; sortable by score/likes/replies + category & min-score
+  filters. In-page video player (`<video>` from videoUrl, falls back to IG embed
+  iframe via shortcode, then an Instagram link). Verified via mocked API in
+  browser: sort, pagination, video fallback all render correctly.
 
 ---
 
