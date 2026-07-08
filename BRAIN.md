@@ -39,6 +39,20 @@ obvious.
 - [ ] Live end-to-end test of Grab It with a real Instagram URL (waiting on Glazy).
 - [ ] Preview env vars on Vercel (blocked on outdated CLI) — optional.
 
+## Deploy notes (2026-07-08)
+
+- **Auto-deploy is NOT working:** the Vercel GitHub App was never installed on
+  `Glazyman/glazystools` (repo has no webhook), so pushes don't trigger deploys.
+  `vercel link` only set the connection on Vercel's side. To fix permanently:
+  install https://github.com/apps/vercel/installations/new for the glazystools
+  repo. Until then, deploy manually with `vercel --prod` (needs explicit user OK
+  — the auto-mode classifier blocks unprompted prod deploys).
+- Grab It went live via a **manual `vercel --prod`** (user-approved) at
+  https://glazystools.vercel.app/tools/grab-it
+- ⚠️ The production site is PUBLIC — anyone with the link can spend Glazy's Apify
+  credits / AI Gateway usage. Consider Vercel password protection or auth before
+  sharing widely.
+
 ## Auth / keys (verified 2026-07-08)
 
 - **Apify:** `APIFY_TOKEN` set in `.env.local` + Vercel (prod/dev). Account
