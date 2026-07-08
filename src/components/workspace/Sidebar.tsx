@@ -11,7 +11,7 @@ const statusDot: Record<string, string> = {
   planned: "bg-subtle",
 };
 
-export function Sidebar() {
+export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const pathname = usePathname();
   const [query, setQuery] = useState("");
   const byCat = toolsByCategory();
@@ -26,9 +26,21 @@ export function Sidebar() {
         <span className="text-[11px] font-semibold uppercase tracking-wider text-subtle">
           Tools
         </span>
-        <span className="rounded bg-elevated px-1.5 py-0.5 text-[10px] text-muted">
-          {tools.length}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded bg-elevated px-1.5 py-0.5 text-[10px] text-muted">
+            {tools.length}
+          </span>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+              className="hidden h-6 w-6 items-center justify-center rounded text-subtle hover:bg-hover hover:text-fg md:flex"
+            >
+              «
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Search */}

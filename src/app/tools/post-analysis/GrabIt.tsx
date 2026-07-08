@@ -38,7 +38,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v9";
+const TOOL_VERSION = "v10";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.

@@ -10,7 +10,8 @@ import { TopBar } from "./TopBar";
 // Desktop: [ activity bar | sidebar | ( top bar / content ) ]
 // Mobile:  full-width content with a hamburger that opens the chrome as a drawer.
 export function WorkspaceShell({ children }: { children: ReactNode }) {
-  const [navOpen, setNavOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false); // mobile drawer
+  const [collapsed, setCollapsed] = useState(false); // desktop sidebar
   const pathname = usePathname();
 
   // Close the mobile drawer whenever the route changes.
@@ -18,10 +19,10 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden">
-      {/* Desktop chrome — hidden on small screens */}
+      {/* Desktop chrome — hidden on small screens; sidebar can be collapsed */}
       <div className="hidden md:flex">
         <ActivityBar />
-        <Sidebar />
+        {!collapsed && <Sidebar onCollapse={() => setCollapsed(true)} />}
       </div>
 
       {/* Mobile drawer */}
@@ -40,7 +41,11 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar onMenu={() => setNavOpen(true)} />
+        <TopBar
+          onMenu={() => setNavOpen(true)}
+          sidebarCollapsed={collapsed}
+          onToggleSidebar={() => setCollapsed((c) => !c)}
+        />
         <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>

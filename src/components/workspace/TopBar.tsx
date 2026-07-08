@@ -14,7 +14,15 @@ function crumbs(pathname: string) {
   return [pathname];
 }
 
-export function TopBar({ onMenu }: { onMenu?: () => void }) {
+export function TopBar({
+  onMenu,
+  sidebarCollapsed,
+  onToggleSidebar,
+}: {
+  onMenu?: () => void;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
+}) {
   const pathname = usePathname();
   const parts = crumbs(pathname);
 
@@ -33,6 +41,17 @@ export function TopBar({ onMenu }: { onMenu?: () => void }) {
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
+        {/* Sidebar toggle — desktop only */}
+        {onToggleSidebar && (
+          <button
+            aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            onClick={onToggleSidebar}
+            className="-ml-1 hidden h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-fg md:flex"
+          >
+            {sidebarCollapsed ? "»" : "«"}
+          </button>
+        )}
         {parts.map((p, i) => (
           <span key={i} className="flex items-center gap-2">
             {i > 0 && <span className="text-subtle">/</span>}

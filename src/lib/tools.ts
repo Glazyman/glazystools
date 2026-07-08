@@ -17,12 +17,12 @@ export type Tool = {
 
 export const tools: Tool[] = [
   {
-    slug: "grab-it",
-    name: "Grab It",
-    tagline: "Mine any post's comments for ideas & add-ons",
+    slug: "post-analysis",
+    name: "Post Analysis",
+    tagline: "Analyze any post's video & comments for ideas",
     description:
       "Paste a link from Instagram, TikTok, Reddit, X, Facebook or YouTube. It scrapes the video, caption, and every comment, transcribes what the video says, then surfaces the best ideas from the comments — every comment scored and sortable. Or just grab the transcript or download the video.",
-    icon: "🎯",
+    icon: "📊",
     category: "Content",
     status: "wip",
     accent: "violet",
