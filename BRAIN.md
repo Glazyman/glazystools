@@ -62,6 +62,14 @@ obvious.
   automatically in prod. Probed `google/gemini-2.5-flash` → works. Note: local
   OIDC token expires ~12h; re-run `vercel env pull .env.local` to refresh.
 
+## Supabase schema
+
+- **`grab_it_runs`** (migration `create_grab_it_runs`): id, created_at, url,
+  author, caption, thumbnail, comments_count, `post` jsonb, `analysis` jsonb.
+  RLS enabled with permissive anon read/insert/delete policies (no auth yet).
+  ⚠️ Anyone with the site can read/write saved runs — revisit when auth lands.
+  Client access via `src/lib/grab-it/runs.ts` using the browser Supabase client.
+
 ## Tools
 
 ### Grab It (`grab-it`) — status: wip
@@ -90,6 +98,10 @@ Paste an Instagram reel/post URL → mine the comments for ideas.
   filters. In-page video player (`<video>` from videoUrl, falls back to IG embed
   iframe via shortcode, then an Instagram link). Verified via mocked API in
   browser: sort, pagination, video fallback all render correctly.
+- **Saved runs (2026-07-08):** Run/Saved tabs. Every completed run auto-saves to
+  Supabase `grab_it_runs`; Saved tab lists them (author, caption, count, date),
+  click to reopen (loads full post+analysis from DB), Delete to remove. Verified
+  the whole insert→list→open→delete cycle end-to-end.
 
 ---
 

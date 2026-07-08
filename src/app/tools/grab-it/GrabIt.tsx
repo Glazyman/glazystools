@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Analysis, ScoredComment, ScrapedPost } from "@/lib/grab-it/types";
+import {
+  deleteRun,
+  getRun,
+  listRuns,
+  saveRun,
+  type RunMeta,
+} from "@/lib/grab-it/runs";
 
 type Stage = "idle" | "scraping" | "analyzing" | "done" | "error";
 
@@ -13,17 +20,41 @@ const stageSteps = [
 
 const PAGE = 5;
 
+type View = "run" | "saved";
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 export function GrabIt() {
+  const [view, setView] = useState<View>("run");
   const [url, setUrl] = useState("");
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
   const [post, setPost] = useState<ScrapedPost | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saved, setSaved] = useState<RunMeta[]>([]);
+  const [savedLoading, setSavedLoading] = useState(true);
+
+  const refreshSaved = useCallback(async () => {
+    setSavedLoading(true);
+    try {
+      setSaved(await listRuns());
+    } catch {
+      // Table may be unreachable; leave the list empty.
+    } finally {
+      setSavedLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSaved();
+  }, [refreshSaved]);
 
   async function run() {
     setError(null);
     setPost(null);
     setAnalysis(null);
+    setSaveState("idle");
+    setView("run");
     setStage("scraping");
     try {
       const scrapeRes = await fetch("/api/grab-it/scrape", {
@@ -46,44 +77,225 @@ export function GrabIt() {
         throw new Error(analyzeData.error ?? "Analysis failed.");
       setAnalysis(analyzeData.analysis);
       setStage("done");
+
+      // Auto-save every completed run.
+      setSaveState("saving");
+      try {
+        await saveRun(scrapeData.post, analyzeData.analysis);
+        setSaveState("saved");
+        refreshSaved();
+      } catch {
+        setSaveState("error");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setStage("error");
     }
   }
 
+  async function openSaved(id: string) {
+    const full = await getRun(id);
+    setPost(full.post);
+    setAnalysis(full.analysis);
+    setStage("done");
+    setSaveState("saved");
+    setError(null);
+    setView("run");
+  }
+
   const busy = stage === "scraping" || stage === "analyzing";
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && url && !busy && run()}
-          placeholder="https://www.instagram.com/reel/…"
-          className="flex-1 rounded-lg border border-border bg-elevated px-3.5 py-2.5 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
-        />
-        <button
-          onClick={run}
-          disabled={!url || busy}
-          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-border">
+        <TabButton active={view === "run"} onClick={() => setView("run")}>
+          Run
+        </TabButton>
+        <TabButton
+          active={view === "saved"}
+          onClick={() => {
+            setView("saved");
+            refreshSaved();
+          }}
         >
-          {busy ? "Working…" : "Grab it"}
-        </button>
+          Saved{saved.length > 0 ? ` (${saved.length})` : ""}
+        </TabButton>
       </div>
 
-      {stage !== "idle" && <StageBar stage={stage} />}
+      {view === "run" ? (
+        <>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && url && !busy && run()}
+              placeholder="https://www.instagram.com/reel/…"
+              className="flex-1 rounded-lg border border-border bg-elevated px-3.5 py-2.5 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
+            />
+            <button
+              onClick={run}
+              disabled={!url || busy}
+              className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? "Working…" : "Grab it"}
+            </button>
+          </div>
 
-      {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
-        </div>
+          {stage !== "idle" && <StageBar stage={stage} />}
+
+          {stage === "done" && <SaveIndicator state={saveState} />}
+
+          {error && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+          {analysis && post && <Results post={post} analysis={analysis} />}
+
+          {stage === "idle" && <EmptyHint />}
+        </>
+      ) : (
+        <SavedView
+          items={saved}
+          loading={savedLoading}
+          onOpen={openSaved}
+          onDeleted={refreshSaved}
+        />
       )}
+    </div>
+  );
+}
 
-      {analysis && post && <Results post={post} analysis={analysis} />}
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+        active
+          ? "border-accent text-fg"
+          : "border-transparent text-muted hover:text-fg"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
-      {stage === "idle" && <EmptyHint />}
+function SaveIndicator({ state }: { state: SaveState }) {
+  if (state === "idle") return null;
+  const map = {
+    saving: { text: "Saving to your library…", cls: "text-muted" },
+    saved: { text: "✓ Saved — find it in the Saved tab", cls: "text-emerald-400" },
+    error: {
+      text: "Couldn't save this run (it's still shown here).",
+      cls: "text-amber-400",
+    },
+  } as const;
+  const s = map[state as keyof typeof map];
+  if (!s) return null;
+  return <p className={`text-xs ${s.cls}`}>{s.text}</p>;
+}
+
+function SavedView({
+  items,
+  loading,
+  onOpen,
+  onDeleted,
+}: {
+  items: RunMeta[];
+  loading: boolean;
+  onOpen: (id: string) => void | Promise<void>;
+  onDeleted: () => void;
+}) {
+  if (loading) {
+    return <p className="py-8 text-center text-sm text-subtle">Loading…</p>;
+  }
+  if (items.length === 0) {
+    return (
+      <div className="grid-bg rounded-xl border border-dashed border-border-strong px-6 py-14 text-center">
+        <p className="text-sm text-muted">
+          No saved runs yet. Every run you do is saved here automatically.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {items.map((r) => (
+        <SavedCard key={r.id} run={r} onOpen={onOpen} onDeleted={onDeleted} />
+      ))}
+    </div>
+  );
+}
+
+function SavedCard({
+  run,
+  onOpen,
+  onDeleted,
+}: {
+  run: RunMeta;
+  onOpen: (id: string) => void | Promise<void>;
+  onDeleted: () => void;
+}) {
+  const [opening, setOpening] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const date = new Date(run.created_at).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-3.5 transition-colors hover:border-border-strong">
+      <button
+        onClick={async () => {
+          setOpening(true);
+          try {
+            await onOpen(run.id);
+          } finally {
+            setOpening(false);
+          }
+        }}
+        className="min-w-0 flex-1 text-left"
+      >
+        <div className="flex items-center gap-2 text-sm">
+          <span className="font-medium text-fg">@{run.author ?? "unknown"}</span>
+          <span className="text-subtle">·</span>
+          <span className="text-muted">{run.comments_count ?? 0} comments</span>
+          {opening && <Spinner />}
+        </div>
+        <p className="mt-0.5 truncate text-xs text-muted">
+          {run.caption?.trim() || run.url}
+        </p>
+        <p className="mt-0.5 text-[11px] text-subtle">{date}</p>
+      </button>
+      <button
+        onClick={async () => {
+          setDeleting(true);
+          try {
+            await deleteRun(run.id);
+            onDeleted();
+          } catch {
+            setDeleting(false);
+          }
+        }}
+        disabled={deleting}
+        aria-label="Delete saved run"
+        className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-subtle hover:bg-hover hover:text-red-300 disabled:opacity-50"
+      >
+        {deleting ? "…" : "Delete"}
+      </button>
     </div>
   );
 }
