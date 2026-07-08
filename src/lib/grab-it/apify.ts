@@ -28,16 +28,21 @@ function token() {
   return t;
 }
 
-// Instagram auth cookies for deep scraping, provided via env (JSON array from a
-// "cookie export" extension, or a raw cookie string). Null when not configured.
-function instagramCookies(): unknown | null {
+// Instagram auth cookies for deep scraping. The deep actor wants a cookie-header
+// STRING ("name=value; name=value"). Accept either a JSON array (from a cookie
+// export extension) or a raw string in APIFY_INSTAGRAM_COOKIES.
+function instagramCookies(): string | null {
   const raw = process.env.APIFY_INSTAGRAM_COOKIES?.trim();
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    const arr = JSON.parse(raw) as { name: string; value: string }[];
+    if (Array.isArray(arr)) {
+      return arr.map((c) => `${c.name}=${c.value}`).join("; ");
+    }
   } catch {
-    return raw; // fall back to raw string form
+    // not JSON — assume it's already a cookie string
   }
+  return raw;
 }
 
 export async function runActor<T = Record<string, unknown>>(
@@ -71,8 +76,10 @@ export function normalizeComment(
     raw.text ?? raw.comment ?? raw.body ?? raw.commentText ?? raw.content ?? "",
   ).trim();
   if (!text) return null;
+  // Some actors nest the author under a `user`/`owner` object.
+  const user = (raw.user ?? raw.owner ?? {}) as Record<string, unknown>;
   return {
-    id: String(raw.id ?? raw.commentId ?? raw.cid ?? `c${i}`),
+    id: String(raw.id ?? raw.commentId ?? raw.cid ?? raw.pk ?? `c${i}`),
     text,
     author: String(
       raw.ownerUsername ??
@@ -81,6 +88,8 @@ export function normalizeComment(
         raw.author ??
         raw.uniqueId ??
         raw.name ??
+        user.username ??
+        user.full_name ??
         "unknown",
     ),
     likes:
@@ -92,16 +101,24 @@ export function normalizeComment(
           raw.upVotes ??
           raw.upvotes ??
           raw.voteCount ??
+          raw.comment_like_count ??
           0,
       ) || 0,
     timestamp: raw.timestamp
       ? String(raw.timestamp)
       : raw.createdAt
         ? String(raw.createdAt)
-        : undefined,
+        : raw.created_at
+          ? String(raw.created_at)
+          : undefined,
     replyCount:
-      Number(raw.repliesCount ?? raw.replies_count ?? raw.replyCount ?? 0) ||
-      undefined,
+      Number(
+        raw.repliesCount ??
+          raw.replies_count ??
+          raw.replyCount ??
+          raw.child_comment_count ??
+          0,
+      ) || undefined,
   };
 }
 
