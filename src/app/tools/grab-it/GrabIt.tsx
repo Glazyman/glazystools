@@ -29,10 +29,33 @@ type View = "run" | "saved";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
+// POST JSON with a hard timeout so a hung/slow API call can't freeze the UI.
+async function postJson(
+  url: string,
+  body: unknown,
+  timeoutMs = 150_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // Turn raw API errors into something actionable — especially the AI Gateway
 // free-tier rate limit, which is the most common failure.
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
+  if (/abort/i.test(msg)) {
+    return "That took too long and was stopped. Any comments already fetched are shown below — hit Retry to try the analysis again.";
+  }
   if (/rate.?limit|rate-limited|too many requests|\b429\b/i.test(msg)) {
     return "The AI is rate-limited on the Vercel Gateway free tier right now. Your comments are shown below — wait ~30s and hit Retry, or add Gateway credits for unlimited runs.";
   }
@@ -112,11 +135,7 @@ export function GrabIt() {
     setView("run");
     setStage("scraping");
     try {
-      const scrapeRes = await fetch("/api/grab-it/scrape", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
+      const scrapeRes = await postJson("/api/grab-it/scrape", { url }, 240_000);
       const scrapeData = await scrapeRes.json();
       if (!scrapeRes.ok) throw new Error(scrapeData.error ?? "Scrape failed.");
       setPost(scrapeData.post);
@@ -130,10 +149,8 @@ export function GrabIt() {
       // Transcript-only mode: just get the words.
       if (mode === "transcript") {
         setStage("analyzing");
-        const res = await fetch("/api/grab-it/transcribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ post: scrapeData.post }),
+        const res = await postJson("/api/grab-it/transcribe", {
+          post: scrapeData.post,
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Transcription failed.");
@@ -159,11 +176,7 @@ export function GrabIt() {
 
   // Shared analyze + auto-save, reused by run() and the Retry button.
   async function analyzeAndSave(p: ScrapedPost) {
-    const res = await fetch("/api/grab-it/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ post: p }),
-    });
+    const res = await postJson("/api/grab-it/analyze", { post: p });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Analysis failed.");
     setAnalysis(data.analysis);
@@ -637,41 +650,91 @@ function deriveShortcode(url: string): string | undefined {
 
 function VideoPlayer({ post }: { post: ScrapedPost }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [embed, setEmbed] = useState(false);
+  const isInstagram = /instagram\.com/i.test(post.url);
+  const shortcode = post.shortcode ?? deriveShortcode(post.url);
 
+  // If the direct video file doesn't start loading within a few seconds (common
+  // for hotlink-protected Instagram CDN URLs, which otherwise spin forever), bail
+  // to the safe placeholder instead of hanging the page.
+  useEffect(() => {
+    if (!post.videoUrl || failed || loaded) return;
+    const t = setTimeout(() => setFailed(true), 7000);
+    return () => clearTimeout(t);
+  }, [post.videoUrl, failed, loaded]);
+
+  // 1) Try the direct video file. We NEVER auto-load an embed iframe (that can
+  //    freeze the page) — the embed is behind an explicit button below.
   if (post.videoUrl && !failed) {
     return (
       <video
         controls
         playsInline
+        preload="metadata"
         poster={post.displayUrl}
+        onLoadedMetadata={() => setLoaded(true)}
         onError={() => setFailed(true)}
+        onStalled={() => setFailed(true)}
         src={post.videoUrl}
         className="max-h-[460px] w-full rounded-lg bg-black object-contain"
       />
     );
   }
-  // Instagram-only embed fallback (other platforms don't share this embed URL).
-  const isInstagram = /instagram\.com/i.test(post.url);
-  const shortcode = post.shortcode ?? deriveShortcode(post.url);
-  if (isInstagram && shortcode) {
+
+  // 2) Embed player — ONLY when the user explicitly asks (never auto-loaded).
+  if (embed && isInstagram && shortcode) {
+    const path = /\/p\//.test(post.url) ? "p" : "reel";
     return (
       <iframe
-        title="Instagram video"
-        src={`https://www.instagram.com/reel/${shortcode}/embed`}
+        title="Instagram player"
+        src={`https://www.instagram.com/${path}/${shortcode}/embed`}
         className="h-[460px] w-full rounded-lg border border-border bg-black"
         allowFullScreen
       />
     );
   }
+
+  // 3) Safe placeholder: poster + explicit actions. Never hangs the page.
   return (
-    <a
-      href={post.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex h-40 items-center justify-center rounded-lg border border-dashed border-border-strong text-sm text-muted"
-    >
-      Open original ↗
-    </a>
+    <div className="relative flex min-h-[220px] flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-border bg-black/40 p-4">
+      {post.displayUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={post.displayUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover opacity-30"
+        />
+      )}
+      <div className="relative flex flex-col items-center gap-2 text-center">
+        <a
+          href={post.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg hover:bg-accent-strong"
+        >
+          ▶ Open original ↗
+        </a>
+        {post.videoUrl && (
+          <a
+            href={`/api/grab-it/download?url=${encodeURIComponent(
+              post.videoUrl,
+            )}&name=${encodeURIComponent(`${post.author}-video`)}`}
+            className="text-xs text-muted hover:text-fg"
+          >
+            ⬇ download video
+          </a>
+        )}
+        {isInstagram && shortcode && (
+          <button
+            onClick={() => setEmbed(true)}
+            className="text-xs text-subtle hover:text-fg"
+          >
+            load embedded player
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
