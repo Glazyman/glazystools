@@ -21,9 +21,33 @@ obvious.
   - `docs/ADDING-TOOLS.md` — how to add a tool
   - `docs/RECOMMENDED-TOOLS.md` — libraries & tips
 
+## Infrastructure
+
+- **GitHub:** https://github.com/Glazyman/glazystools (main branch).
+- **Vercel:** project `daniels-projects-dce54a5d/glazystools`, GitHub-connected
+  (push to main auto-deploys, PRs get preview URLs).
+- **Supabase:** project `glazystools` (ref `rajhjdctynqtgpetcnbs`, us-east-1,
+  free tier) in org "daniel's projects". URL + publishable key live in
+  `.env.local` (local) and Vercel env (Production + Development).
+  - Client helpers: `src/lib/supabase/client.ts` (browser),
+    `src/lib/supabase/server.ts` (server/SSR).
+  - Note: Preview env vars not set (outdated Vercel CLI rejected the flags);
+    add later via dashboard if PR previews need Supabase.
+
 ## Open questions / next up
 
 - [ ] Decide which tool to build first (waiting on Glazy).
+
+---
+
+## 2026-07-07 — Connected GitHub, Vercel, and Supabase
+
+- Pushed the workspace to GitHub (Glazyman/glazystools).
+- Linked & GitHub-connected the Vercel project → auto-deploy on push. First
+  production deploy is live and Ready.
+- Created Supabase project `glazystools` via MCP; added `@supabase/ssr` +
+  `@supabase/supabase-js`, scaffolded browser/server client helpers, wired env
+  vars locally and into Vercel (prod + dev).
 
 ---
 
