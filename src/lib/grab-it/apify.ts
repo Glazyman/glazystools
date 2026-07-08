@@ -15,11 +15,29 @@ const POST_ACTOR =
 const COMMENT_ACTOR =
   process.env.APIFY_INSTAGRAM_COMMENT_ACTOR ??
   "apify~instagram-comment-scraper";
+// Authenticated deep-comment actor: with the user's Instagram cookies it pulls
+// ALL comments (the logged-out scraper only sees a small batch). Cheap per
+// comment (~$0.0002). Used only when APIFY_INSTAGRAM_COOKIES is set.
+const DEEP_COMMENT_ACTOR =
+  process.env.APIFY_INSTAGRAM_DEEP_ACTOR ??
+  "louisdeconinck~instagram-comments-scraper";
 
 function token() {
   const t = process.env.APIFY_TOKEN;
   if (!t) throw new Error("APIFY_TOKEN is not set.");
   return t;
+}
+
+// Instagram auth cookies for deep scraping, provided via env (JSON array from a
+// "cookie export" extension, or a raw cookie string). Null when not configured.
+function instagramCookies(): unknown | null {
+  const raw = process.env.APIFY_INSTAGRAM_COOKIES?.trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw; // fall back to raw string form
+  }
 }
 
 export async function runActor<T = Record<string, unknown>>(
@@ -125,16 +143,36 @@ export async function scrapeInstagram(
     ? (post.latestComments as Record<string, unknown>[])
     : [];
 
-  // 2) Full comment sweep via the dedicated comment actor.
+  // 2) Comment sweep. With auth cookies, use the deep actor (ALL comments);
+  //    otherwise the logged-out actor (small batch).
   let commentItems: Record<string, unknown>[] = [];
-  try {
-    commentItems = await runActor<Record<string, unknown>>(COMMENT_ACTOR, {
-      directUrls: [url],
-      resultsLimit: commentLimit,
-    });
-  } catch {
-    // Fall back to whatever came inline if the comment actor is unavailable.
-    commentItems = inlineComments;
+  const cookies = instagramCookies();
+  if (cookies) {
+    try {
+      const deep = await runActor<Record<string, unknown>>(DEEP_COMMENT_ACTOR, {
+        urls: [url],
+        maxComments: commentLimit,
+        cookies,
+      });
+      // The actor emits a {message:"…provide cookies…"} row when auth is
+      // missing/expired — keep only rows that actually carry comment text.
+      commentItems = deep.filter(
+        (c) => c && (c.text ?? c.comment ?? c.body ?? c.commentText),
+      );
+    } catch {
+      commentItems = [];
+    }
+  }
+  if (commentItems.length === 0) {
+    try {
+      commentItems = await runActor<Record<string, unknown>>(COMMENT_ACTOR, {
+        directUrls: [url],
+        resultsLimit: commentLimit,
+      });
+    } catch {
+      // Fall back to whatever came inline if the comment actor is unavailable.
+      commentItems = inlineComments;
+    }
   }
 
   // Merge + dedupe (prefer the fuller sweep, top up with inline).
