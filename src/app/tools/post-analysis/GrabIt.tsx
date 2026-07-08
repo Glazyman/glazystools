@@ -22,6 +22,13 @@ import {
   saveRun,
   type RunMeta,
 } from "@/lib/grab-it/runs";
+import {
+  createChat,
+  getChat,
+  listChats,
+  updateChat,
+  type ChatThreadMeta,
+} from "@/lib/grab-it/chats";
 
 type Stage = "idle" | "scraping" | "analyzing" | "done" | "error";
 
@@ -38,7 +45,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v12";
+const TOOL_VERSION = "v13";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1227,7 +1234,7 @@ function Results({
           className="group rounded-2xl border border-border bg-panel p-5 shadow-card"
         >
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-fg">
-            <span>💬 Ask Claude</span>
+            <span>💬 Ask Chat</span>
             <span className="text-subtle transition-transform group-open:rotate-180">
               ⌄
             </span>
@@ -1355,17 +1362,89 @@ function ChatPanel({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [threads, setThreads] = useState<ChatThreadMeta[]>([]);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const threadIdRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Fresh conversation whenever a different run is loaded.
+  const refreshThreads = useCallback(async () => {
+    try {
+      setThreads(await listChats(post.url));
+    } catch {
+      /* table unreachable — ignore */
+    }
+  }, [post.url]);
+
+  // On opening a run, load its most recent chat thread (continue where you left
+  // off). Start a fresh one with "New chat".
   useEffect(() => {
-    setMessages([]);
     setError(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = await listChats(post.url);
+        if (cancelled) return;
+        setThreads(t);
+        if (t.length) {
+          const full = await getChat(t[0].id);
+          if (cancelled) return;
+          setMessages(full.messages ?? []);
+          threadIdRef.current = t[0].id;
+          setThreadId(t[0].id);
+        } else {
+          setMessages([]);
+          threadIdRef.current = null;
+          setThreadId(null);
+        }
+      } catch {
+        if (!cancelled) setMessages([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [post.url]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
+
+  // Persist the thread after each completed exchange.
+  async function persist(msgs: ChatMsg[]) {
+    try {
+      if (threadIdRef.current) {
+        await updateChat(threadIdRef.current, msgs);
+        refreshThreads();
+      } else {
+        const id = await createChat(post.url, msgs);
+        threadIdRef.current = id;
+        setThreadId(id);
+        refreshThreads();
+      }
+    } catch {
+      /* save failed — chat still works in-session */
+    }
+  }
+
+  function newChat() {
+    setMessages([]);
+    setInput("");
+    setError(null);
+    threadIdRef.current = null;
+    setThreadId(null);
+  }
+
+  async function openThread(id: string) {
+    if (id === threadIdRef.current) return;
+    try {
+      const full = await getChat(id);
+      setMessages(full.messages ?? []);
+      threadIdRef.current = id;
+      setThreadId(id);
+    } catch {
+      setError("Couldn't load that chat.");
+    }
+  }
 
   function buildContext() {
     return {
@@ -1416,6 +1495,8 @@ function ChatPanel({
           return cp;
         });
       }
+      // Auto-save the thread once the answer is complete.
+      await persist([...next, { role: "assistant", content: acc }]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chat failed.");
     } finally {
@@ -1428,9 +1509,39 @@ function ChatPanel({
     <div>
       <p className="mb-3 text-xs text-muted">
         Ask anything — understand the video, dig into a comment, brainstorm, or
-        figure out how to build on an idea. It&apos;ll go beyond the video when
-        you want it to.
+        figure out how to build on an idea. It can search the web too. Chats
+        auto-save.
       </p>
+
+      {/* Thread switcher — separate chats, continue old ones */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={newChat}
+          className="rounded-md border border-border bg-elevated px-2.5 py-1 text-xs text-muted transition-colors hover:border-accent hover:text-fg"
+        >
+          ＋ New chat
+        </button>
+        {threads.length > 0 && (
+          <select
+            value={threadId ?? ""}
+            onChange={(e) => {
+              if (e.target.value) openThread(e.target.value);
+              else newChat();
+            }}
+            className="max-w-[240px] rounded-md border border-border bg-elevated px-2 py-1 text-xs text-fg focus:outline-none"
+          >
+            <option value="">Current chat</option>
+            {threads.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title || "Untitled chat"}
+              </option>
+            ))}
+          </select>
+        )}
+        <span className="text-[11px] text-subtle">
+          {threads.length} saved
+        </span>
+      </div>
 
       {messages.length > 0 && (
         <div

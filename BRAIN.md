@@ -106,8 +106,25 @@ obvious.
   automatically in prod. Probed `google/gemini-2.5-flash` → works. Note: local
   OIDC token expires ~12h; re-run `vercel env pull .env.local` to refresh.
 
+## Auth
+- **Site password gate (2026-07-08):** `src/proxy.ts` (Next 16 proxy convention,
+  NOT middleware) gates all pages+API; `/login` + `/api/login` public. Password
+  `glazy` (env `SITE_PASSWORD`). Cookie `glazy_auth` = SHA-256 of password, 1yr
+  maxAge (stays logged in). `src/lib/auth.ts` shared by proxy + login route.
+
+## Chat (Post Analysis "Ask Chat")
+- Model `google/gemini-2.5-flash` via AI Gateway free tier (NOT Claude/user tokens).
+- **Web search:** Gemini Google Search grounding via `google.tools.googleSearch()`
+  (@ai-sdk/google), attached only for google/* models; cast past an ai@7 generic
+  mismatch. Verified live (returned current Next.js version). Not restricted to
+  the video — uses general knowledge + web freely.
+- **Chat history:** `grab_it_chats` table (post_url, title, messages jsonb);
+  `src/lib/grab-it/chats.ts` CRUD. Auto-saves each exchange; opening a run loads
+  its most recent thread; "New chat" + thread dropdown to switch/continue.
+
 ## Supabase schema
 
+- **`grab_it_chats`** (migration `create_grab_it_chats`): chat threads per post.
 - **`grab_it_runs`** (migration `create_grab_it_runs`): id, created_at, url,
   author, caption, thumbnail, comments_count, `post` jsonb, `analysis` jsonb.
   RLS enabled with permissive anon read/insert/delete policies (no auth yet).

@@ -1,4 +1,5 @@
-import { streamText } from "ai";
+import { google } from "@ai-sdk/google";
+import { streamText, type ToolSet } from "ai";
 
 export const maxDuration = 60;
 
@@ -24,6 +25,7 @@ function buildSystem(ctx: ChatContext): string {
     "You are a sharp, genuinely helpful assistant for a creator analyzing a video/post and its comments.",
     "The transcript, summary, and comments below are your PRIMARY context — ground answers in them and reference them when relevant.",
     "You are NOT restricted to them. When the user wants to go further — explain a concept from the comments, expand on an idea, brainstorm, compare to other things, or figure out HOW TO BUILD or act on something — use your own general knowledge freely and help fully. Never refuse just because something isn't in the transcript; only flag the source distinction when it genuinely matters (e.g. 'the comments don't say, but here's how it generally works').",
+    "You can search the web (Google Search) when a question needs current, factual, or outside information — use it, then answer with what you found.",
     "Be concise, concrete, and practical. Give real steps, examples, and tools when asked how to do or build something.",
     "",
     `VIDEO by @${ctx.author ?? "unknown"}`,
@@ -61,10 +63,20 @@ export async function POST(req: Request) {
     if (!Array.isArray(messages) || messages.length === 0) {
       return Response.json({ error: "No messages." }, { status: 400 });
     }
+    // Google Search grounding — lets Gemini look things up on the web for
+    // current/outside info. Only attach it for Google models (the tool is
+    // provider-executed by Gemini; the call still routes via the AI Gateway).
+    const useSearch = CHAT_MODEL.startsWith("google/");
+    // Cast bridges a generic mismatch between @ai-sdk/google and ai core; the
+    // tool shape is correct at runtime.
+    const tools = useSearch
+      ? ({ google_search: google.tools.googleSearch({}) } as unknown as ToolSet)
+      : undefined;
     const result = streamText({
       model: CHAT_MODEL,
       system: buildSystem(context ?? {}),
       messages,
+      tools,
     });
     return result.toTextStreamResponse();
   } catch (err) {
