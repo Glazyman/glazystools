@@ -72,7 +72,8 @@ async function transcribeVideo(
   }
 }
 
-const analysisSchema = z.object({
+// Fields common to both analysis modes.
+const baseFields = {
   transcript: z
     .string()
     .describe(
@@ -97,6 +98,11 @@ const analysisSchema = z.object({
     .describe(
       "Secondary: a few ready-to-post replies that add value. Keep this short — replies are not the main goal.",
     ),
+};
+
+// Small posts: score every comment 0-100.
+const scoringSchema = z.object({
+  ...baseFields,
   scoredComments: z.array(
     z.object({
       id: z.string(),
@@ -118,6 +124,17 @@ const analysisSchema = z.object({
         ),
     }),
   ),
+});
+
+// Large posts: skip per-comment scoring (too many) and instead pick the comments
+// most RELEVANT to the video — the ones that genuinely engage with its content.
+const relevanceSchema = z.object({
+  ...baseFields,
+  relevantCommentIds: z
+    .array(z.string())
+    .describe(
+      "The ids of the comments MOST RELEVANT to the video — ones that engage with its actual content: real ideas, add-ons, sharp questions, corrections, insights. Exclude spam, emoji-only, tag-a-friend, and generic praise. Best/most-relevant first, up to ~40.",
+    ),
 });
 
 // Step 2 alone — resolve just the transcript (used by "transcript only" mode).
@@ -166,13 +183,21 @@ async function loadVideoPart(
   }
 }
 
+// Above this many comments, per-comment scoring is too big/slow (and blows the
+// rate limit), so we switch to a "most relevant to the video" shortlist instead.
+const SCORE_THRESHOLD = Number(process.env.GRAB_IT_SCORE_THRESHOLD ?? 50);
+
 // Step 2, 3 & 4 combined — transcribe + read the room + get ideas, in one call.
 export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
-  // Drop junk for free, score the most-engaged first, cap what the model sees.
+  // Drop junk for free, most-engaged first, cap what the model sees.
   const meaningful = post.comments
     .filter((c) => !isJunk(c.text))
     .sort((a, b) => b.likes - a.likes);
   const comments = meaningful.slice(0, MAX_COMMENTS_TO_SCORE);
+
+  // Small enough → score each; too many → relevance shortlist only.
+  const scoringMode: Analysis["scoringMode"] =
+    comments.length <= SCORE_THRESHOLD ? "scored" : "relevant";
 
   const isVideo = post.kind === "video";
   const noun = isVideo ? "video" : "post";
@@ -183,6 +208,11 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
       ? await loadVideoPart(post.videoUrl)
       : null;
   const hasVideo = !!videoPart;
+
+  const commentTask =
+    scoringMode === "scored"
+      ? `Read every comment against the ${noun}. Score each 0-100 on how much value/insight it adds (great add-ons, ideas, corrections, sharp questions score high; spam/emoji/generic praise score low). Return one scoredComments entry per comment id above.`
+      : `There are too many comments to score individually. Instead, pick the ones MOST RELEVANT to the ${noun} — comments that genuinely engage with its content (real ideas, add-ons, sharp questions, corrections, insights). Return their ids in relevantCommentIds, best first (up to ~40). Skip spam, emoji, tag-a-friend, and generic praise.`;
 
   const prompt = [
     `You are helping a creator mine the comments on a ${noun} for great ideas and add-ons.`,
@@ -205,20 +235,19 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     ``,
     `Tasks:`,
     `1. ${hasVideo ? "Transcribe the video, then summarize" : "Summarize"} what this ${noun} is really about.`,
-    `2. Read every comment against the ${noun}. Score each 0-100 on how much value/insight it adds (great add-ons, ideas, corrections, sharp questions score high; spam/emoji/generic praise score low). Return one entry per comment id above.`,
+    `2. ${commentTask}`,
     `3. Pull out the best ideas & add-ons the commenters surfaced (this is the point), plus what people are asking and what's missing.`,
     `4. Only briefly: a few draft replies I could post. Keep this minimal.`,
   ].join("\n");
 
-  const content: Array<
-    { type: "text"; text: string } | VideoFilePart
-  > = hasVideo ? [{ type: "text", text: prompt }, videoPart] : [
-    { type: "text", text: prompt },
-  ];
+  const content: Array<{ type: "text"; text: string } | VideoFilePart> =
+    hasVideo
+      ? [{ type: "text", text: prompt }, videoPart]
+      : [{ type: "text", text: prompt }];
 
   const { object } = await generateObject({
     model: ANALYSIS_MODEL,
-    schema: analysisSchema,
+    schema: scoringMode === "scored" ? scoringSchema : relevanceSchema,
     maxRetries: 4, // ride out transient rate limits with backoff
     messages: [{ role: "user", content }],
   });
@@ -235,23 +264,30 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     transcriptSource = "unavailable";
   }
 
-  // Merge Claude's scores back onto the full comment objects by id.
   const byId = new Map(comments.map((c) => [c.id, c]));
-  const scoredComments: ScoredComment[] = object.scoredComments
-    .flatMap((s): ScoredComment[] => {
-      const base = byId.get(s.id);
-      if (!base) return [];
-      return [
-        {
-          ...base,
-          score: Math.max(0, Math.min(100, Math.round(s.score))),
-          category: s.category,
-          reason: s.reason,
-          replyIdea: s.replyIdea?.trim() || undefined,
-        },
-      ];
-    })
-    .sort((a, b) => b.score - a.score);
+  let scoredComments: ScoredComment[] = [];
+  let relevantCommentIds: string[] = [];
+
+  if (scoringMode === "scored" && "scoredComments" in object) {
+    scoredComments = object.scoredComments
+      .flatMap((s): ScoredComment[] => {
+        const base = byId.get(s.id);
+        if (!base) return [];
+        return [
+          {
+            ...base,
+            score: Math.max(0, Math.min(100, Math.round(s.score))),
+            category: s.category,
+            reason: s.reason,
+            replyIdea: s.replyIdea?.trim() || undefined,
+          },
+        ];
+      })
+      .sort((a, b) => b.score - a.score);
+  } else if ("relevantCommentIds" in object) {
+    // Keep only ids that map to real comments, preserving the model's order.
+    relevantCommentIds = object.relevantCommentIds.filter((id) => byId.has(id));
+  }
 
   return {
     transcript,
@@ -262,5 +298,7 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     followUpIdeas: object.followUpIdeas,
     draftComments: object.draftComments,
     scoredComments,
+    scoringMode,
+    relevantCommentIds,
   };
 }

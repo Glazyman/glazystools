@@ -21,6 +21,8 @@ export type ScrapedPost = {
   likes?: number;
   commentsCount?: number;
   comments: ScrapedComment[];
+  // How the comments were fetched, so the UI can be honest about it.
+  commentSource?: "login" | "logged-out";
 };
 
 // A single comment after Claude has scored it.
@@ -49,5 +51,12 @@ export type Analysis = {
   gaps: string[]; // what's missing / what people want more of
   followUpIdeas: string[]; // strong follow-ups or add-ons to make
   draftComments: string[]; // value-adding comments/replies you could post
+  // Full per-comment scoring — only when there aren't too many comments.
   scoredComments: ScoredComment[];
+  // Whether every comment was scored, or we switched to a relevance shortlist
+  // because there were too many.
+  scoringMode: "scored" | "relevant";
+  // The comment ids the model judged most relevant to the video (used when
+  // there are too many comments to score each one).
+  relevantCommentIds: string[];
 };

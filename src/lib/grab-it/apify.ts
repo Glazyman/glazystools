@@ -222,5 +222,6 @@ export async function scrapeInstagram(
     likes: Number(post.likesCount ?? 0) || undefined,
     commentsCount: Number(post.commentsCount ?? comments.length) || undefined,
     comments,
+    commentSource: direct.length > 0 ? "login" : "logged-out",
   };
 }

@@ -21,8 +21,8 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 
 function buildSystem(ctx: ChatContext): string {
   const lines = [
-    "You are a sharp assistant helping a creator understand an Instagram video and its comments, and mine them for ideas.",
-    "Answer using ONLY the video transcript, summary, and comments provided below. If something isn't covered, say so plainly. Be concise and concrete.",
+    "You are a sharp assistant helping a creator understand a video/post AND its comments. Answer questions about EITHER: the video's own content (use the transcript/summary) or the comments — whatever the user asks.",
+    "Answer using ONLY the transcript, summary, and comments provided below. If something isn't covered, say so plainly. Be concise and concrete.",
     "",
     `VIDEO by @${ctx.author ?? "unknown"}`,
     `SUMMARY: ${ctx.summary ?? "(none)"}`,

@@ -38,7 +38,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v8";
+const TOOL_VERSION = "v9";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -430,18 +430,38 @@ function SavedView({
     setCombined(null);
     try {
       const full = await Promise.all([...selected].map((id) => getRun(id)));
-      const runs = full.map((r) => ({
-        author: r.post.author,
-        url: r.post.url,
-        summary: r.analysis.videoSummary,
-        transcript: r.analysis.transcript,
-        comments: r.analysis.scoredComments.map((c) => ({
-          author: c.author,
-          text: c.text,
-          likes: c.likes,
-          score: c.score,
-        })),
-      }));
+      const runs = full.map((r) => {
+        // Scored runs carry scores; relevance-mode runs don't — fall back to the
+        // most-liked scraped comments so combine still has material to work with.
+        const relevant = new Set(r.analysis.relevantCommentIds ?? []);
+        const comments = r.analysis.scoredComments.length
+          ? r.analysis.scoredComments.map((c) => ({
+              author: c.author,
+              text: c.text,
+              likes: c.likes,
+              score: c.score,
+            }))
+          : [...r.post.comments]
+              .sort(
+                (a, b) =>
+                  (relevant.has(b.id) ? 1 : 0) - (relevant.has(a.id) ? 1 : 0) ||
+                  b.likes - a.likes,
+              )
+              .slice(0, 80)
+              .map((c) => ({
+                author: c.author,
+                text: c.text,
+                likes: c.likes,
+                score: relevant.has(c.id) ? 80 : 0,
+              }));
+        return {
+          author: r.post.author,
+          url: r.post.url,
+          summary: r.analysis.videoSummary,
+          transcript: r.analysis.transcript,
+          comments,
+        };
+      });
       const res = await fetch("/api/grab-it/combine", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -871,8 +891,9 @@ function TranscriptView({
   );
 }
 
-type SortKey = "score" | "likes" | "replies";
+type SortKey = "relevant" | "score" | "likes" | "replies";
 const sortOptions: { key: SortKey; label: string }[] = [
+  { key: "relevant", label: "Most relevant" },
   { key: "score", label: "Top scored" },
   { key: "likes", label: "Most likes" },
   { key: "replies", label: "Most replies" },
@@ -883,6 +904,8 @@ type DisplayComment = ScrapedComment & {
   category?: string;
   reason?: string;
   replyIdea?: string;
+  relevant?: boolean; // AI flagged it as relevant to the video
+  relevanceRank?: number; // order in the relevance shortlist (lower = better)
 };
 
 function Results({
@@ -893,38 +916,58 @@ function Results({
   analysis: Analysis | null;
 }) {
   const hasAI = !!analysis;
-  const [sortBy, setSortBy] = useState<SortKey>(hasAI ? "score" : "likes");
+  const mode = analysis?.scoringMode; // "scored" | "relevant" | undefined
+  const [sortBy, setSortBy] = useState<SortKey>(
+    mode === "relevant" ? "relevant" : hasAI ? "score" : "likes",
+  );
   const [minScore, setMinScore] = useState(0);
   const [category, setCategory] = useState("all");
+  const [relevantOnly, setRelevantOnly] = useState(mode === "relevant");
   const [visible, setVisible] = useState(PAGE);
   const [focused, setFocused] = useState<DisplayComment | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
 
   function askAbout(c: DisplayComment) {
     setFocused(c);
-    document
-      .getElementById("grab-chat")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setChatOpen(true); // make sure the (collapsed) chat opens
+    setTimeout(
+      () =>
+        document
+          .getElementById("grab-chat")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50,
+    );
   }
 
-  // Merge AI scores onto EVERY scraped comment (thousands stay visible; only
-  // the top slice gets scored, the rest show unscored and sort by likes).
+  // Merge AI output onto EVERY scraped comment: scores (scored mode) or the
+  // relevance shortlist (relevant mode). All comments stay visible.
   const allComments: DisplayComment[] = useMemo(() => {
     const byId = new Map(
       (analysis?.scoredComments ?? []).map((c) => [c.id, c]),
     );
+    const relRank = new Map(
+      (analysis?.relevantCommentIds ?? []).map((id, i) => [id, i]),
+    );
     return post.comments.map((c) => {
       const s = byId.get(c.id);
-      return s
-        ? {
-            ...c,
-            score: s.score,
-            category: s.category,
-            reason: s.reason,
-            replyIdea: s.replyIdea,
-          }
-        : { ...c };
+      const rank = relRank.get(c.id);
+      return {
+        ...c,
+        ...(s
+          ? {
+              score: s.score,
+              category: s.category,
+              reason: s.reason,
+              replyIdea: s.replyIdea,
+            }
+          : {}),
+        relevant: rank !== undefined || (s ? s.score >= 60 : false),
+        relevanceRank: rank,
+      };
     });
   }, [post.comments, analysis]);
+
+  const hasRelevant = allComments.some((c) => c.relevant);
 
   const categories = useMemo(
     () => [
@@ -944,18 +987,28 @@ function Results({
     const filtered = allComments.filter(
       (c) =>
         (!hasAI || (c.score ?? 0) >= minScore) &&
-        (category === "all" || c.category === category),
+        (category === "all" || c.category === category) &&
+        (!relevantOnly || c.relevant),
     );
     const key = (c: DisplayComment) =>
       sortBy === "likes"
         ? c.likes
         : sortBy === "replies"
           ? c.replyCount ?? 0
-          : c.score ?? -1; // unscored sink to the bottom when sorting by score
+          : sortBy === "relevant"
+            ? c.relevanceRank !== undefined
+              ? 1_000_000 - c.relevanceRank // shortlist first, in order
+              : c.relevant
+                ? 500_000 + (c.score ?? 0)
+                : c.score ?? c.likes ?? 0
+            : c.score ?? -1; // "score": unscored sink to the bottom
     return [...filtered].sort((a, b) => key(b) - key(a));
-  }, [allComments, sortBy, minScore, category, hasAI]);
+  }, [allComments, sortBy, minScore, category, relevantOnly, hasAI]);
 
-  useEffect(() => setVisible(PAGE), [sortBy, minScore, category]);
+  useEffect(
+    () => setVisible(PAGE),
+    [sortBy, minScore, category, relevantOnly],
+  );
   const shown = sorted.slice(0, visible);
   const noun = post.kind === "video" ? "video" : "post";
   const totalComments = post.commentsCount ?? post.comments.length;
@@ -970,40 +1023,49 @@ function Results({
         </span>
         <span>{totalComments.toLocaleString()} comments</span>
         {post.likes != null && <span>{post.likes.toLocaleString()} likes</span>}
+        {post.commentSource === "login" && (
+          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-400">
+            ✓ comments via login
+          </span>
+        )}
+        {post.commentSource === "logged-out" && (
+          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">
+            ⚠ logged-out fallback (limited)
+          </span>
+        )}
         <a href={post.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
           view original ↗
         </a>
       </div>
 
-      {/* Media + what it's about */}
-      <div className="grid gap-4 md:grid-cols-[minmax(0,300px)_1fr]">
+      {/* Media */}
+      <div className="w-full max-w-[320px]">
         <MediaBlock post={post} />
-        <div className="rounded-xl border border-border bg-panel p-5">
-          <h3 className="mb-2 text-sm font-semibold text-fg">
-            What this {noun} is about
-          </h3>
-          <p className="text-sm leading-relaxed text-fg">
-            {analysis?.videoSummary ?? post.caption ?? "No caption."}
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            {hasAI && (
-              <span className="inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
-                transcript: {analysis!.transcriptSource}
-              </span>
-            )}
-            {post.videoUrl && (
-              <a
-                href={`/api/grab-it/download?url=${encodeURIComponent(
-                  post.videoUrl,
-                )}&name=${encodeURIComponent(`${post.author}-video`)}`}
-                className="text-xs text-accent hover:underline"
-              >
-                ⬇ download video
-              </a>
-            )}
-          </div>
-        </div>
       </div>
+
+      {/* Everything below is a collapsed dropdown — open what you want. */}
+      <Collapsible title={`ℹ️ What this ${noun} is about`}>
+        <p className="text-sm leading-relaxed text-fg">
+          {analysis?.videoSummary ?? post.caption ?? "No caption."}
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {hasAI && (
+            <span className="inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
+              transcript: {analysis!.transcriptSource}
+            </span>
+          )}
+          {post.videoUrl && (
+            <a
+              href={`/api/grab-it/download?url=${encodeURIComponent(
+                post.videoUrl,
+              )}&name=${encodeURIComponent(`${post.author}-video`)}`}
+              className="text-xs text-accent hover:underline"
+            >
+              ⬇ download video
+            </a>
+          )}
+        </div>
+      </Collapsible>
 
       {/* AI-only sections */}
       {hasAI && (
@@ -1019,7 +1081,6 @@ function Results({
             title="💡 Ideas & follow-ups worth making"
             count={analysis!.followUpIdeas.length}
             accent
-            defaultOpen
           >
             <BulletList items={analysis!.followUpIdeas} />
           </Collapsible>
@@ -1040,23 +1101,34 @@ function Results({
         </>
       )}
 
-      {/* Comments explorer — ALWAYS shown, scored or not */}
-      <div className="rounded-xl border border-border bg-panel p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-fg">
-            Comments{" "}
-            <span className="text-subtle">
-              ({post.comments.length.toLocaleString()}
-              {totalComments > post.comments.length
-                ? ` of ${totalComments.toLocaleString()}`
-                : ""}
-              )
-            </span>
-          </h3>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+      {/* Comments explorer — collapsed dropdown */}
+      <Collapsible
+        title={`💬 Comments (${post.comments.length.toLocaleString()}${
+          totalComments > post.comments.length
+            ? ` of ${totalComments.toLocaleString()}`
+            : ""
+        })`}
+      >
+        <div className="mb-4 flex flex-wrap items-center justify-end gap-2 text-xs text-muted">
+            {hasRelevant && (
+              <button
+                onClick={() => setRelevantOnly((v) => !v)}
+                className={`rounded-md border px-2.5 py-1 transition-colors ${
+                  relevantOnly
+                    ? "border-accent bg-accent/15 text-fg"
+                    : "border-border bg-elevated text-muted hover:text-fg"
+                }`}
+              >
+                ⭐ Relevant only
+              </button>
+            )}
             <div className="flex overflow-hidden rounded-md border border-border">
               {sortOptions
-                .filter((o) => o.key !== "score" || hasAI)
+                .filter(
+                  (o) =>
+                    (o.key !== "score" || mode === "scored") &&
+                    (o.key !== "relevant" || hasRelevant),
+                )
                 .map((o) => (
                   <button
                     key={o.key}
@@ -1071,7 +1143,7 @@ function Results({
                   </button>
                 ))}
             </div>
-            {hasAI && (
+            {mode === "scored" && (
               <>
                 <select
                   value={category}
@@ -1098,7 +1170,6 @@ function Results({
                 </label>
               </>
             )}
-          </div>
         </div>
 
         {totalComments > post.comments.length + 5 && (
@@ -1110,7 +1181,16 @@ function Results({
           </p>
         )}
 
-        {hasAI &&
+        {mode === "relevant" && (
+          <p className="mb-3 text-[11px] text-subtle">
+            Too many comments to score each one, so the AI flagged the{" "}
+            {analysis!.relevantCommentIds.length} most relevant to the {noun}{" "}
+            (⭐). Toggle “Relevant only” to focus on those; all comments remain
+            below.
+          </p>
+        )}
+
+        {mode === "scored" &&
           allComments.some((c) => c.score == null) &&
           sortBy === "score" && (
             <p className="mb-3 text-[11px] text-subtle">
@@ -1137,15 +1217,30 @@ function Results({
             <span className="text-subtle"> ({sorted.length - visible} left)</span>
           </button>
         )}
-      </div>
+      </Collapsible>
 
       {hasAI && (
-        <ChatPanel
-          post={post}
-          analysis={analysis!}
-          focused={focused}
-          onClearFocus={() => setFocused(null)}
-        />
+        <details
+          id="grab-chat"
+          open={chatOpen}
+          onToggle={(e) => setChatOpen(e.currentTarget.open)}
+          className="group rounded-xl border border-border bg-panel p-5"
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-fg">
+            <span>💬 Ask Claude</span>
+            <span className="text-subtle transition-transform group-open:rotate-180">
+              ⌄
+            </span>
+          </summary>
+          <div className="mt-3">
+            <ChatPanel
+              post={post}
+              analysis={analysis!}
+              focused={focused}
+              onClearFocus={() => setFocused(null)}
+            />
+          </div>
+        </details>
       )}
 
       {hasAI && analysis!.draftComments.length > 0 && (
@@ -1178,6 +1273,13 @@ function CommentCard({
       <div className="flex items-start gap-3">
         {c.score != null ? (
           <ScoreBadge score={c.score} />
+        ) : c.relevant ? (
+          <span
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/20 text-sm text-accent"
+            title="relevant to the video"
+          >
+            ⭐
+          </span>
         ) : (
           <span
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-elevated text-xs text-subtle"
@@ -1231,9 +1333,10 @@ function CommentCard({
 type ChatMsg = { role: "user" | "assistant"; content: string };
 
 const SUGGESTIONS = [
-  "What are the best ideas in these comments?",
-  "What are people confused about or asking for?",
-  "Summarize the criticism.",
+  "Explain what the video says in simple terms",
+  "What are the video's main points?",
+  "What are the best ideas in the comments?",
+  "What are people asking for?",
   "What should my next video be?",
 ];
 
@@ -1322,10 +1425,9 @@ function ChatPanel({
   }
 
   return (
-    <div id="grab-chat" className="rounded-xl border border-border bg-panel p-5">
-      <h3 className="mb-1 text-sm font-semibold text-fg">💬 Ask Claude</h3>
+    <div>
       <p className="mb-3 text-xs text-muted">
-        Ask anything about the video or the comments.
+        Ask anything about the video&apos;s content or the comments.
       </p>
 
       {messages.length > 0 && (
