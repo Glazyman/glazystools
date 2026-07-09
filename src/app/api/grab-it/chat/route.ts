@@ -3,11 +3,13 @@ import { streamText, type ToolSet } from "ai";
 
 export const maxDuration = 60;
 
-// Chat model, via the AI Gateway. Defaults to Gemini Flash because the Gateway
-// FREE tier blocks premium models (Claude Sonnet returns a 403). Once you add
-// Gateway credits, switch to Claude with:
-//   GRAB_IT_CHAT_MODEL=anthropic/claude-sonnet-4.5
+// Chat models, via the AI Gateway. Free default is Gemini Flash (the only
+// free-tier model, and it can Google-search). "Use Claude" switches to Claude
+// Sonnet 5 for that message — needs AI Gateway credits (and loses web search,
+// which is Gemini-only).
 const CHAT_MODEL = process.env.GRAB_IT_CHAT_MODEL ?? "google/gemini-2.5-flash";
+const CHAT_CLAUDE_MODEL =
+  process.env.GRAB_IT_IDEAS_MODEL ?? "anthropic/claude-sonnet-5";
 
 type ChatContext = {
   author?: string;
@@ -60,24 +62,23 @@ function buildSystem(ctx: ChatContext): string {
 
 export async function POST(req: Request) {
   try {
-    const { messages, context } = (await req.json()) as {
+    const { messages, context, useClaude } = (await req.json()) as {
       messages: ChatMessage[];
       context: ChatContext;
+      useClaude?: boolean;
     };
     if (!Array.isArray(messages) || messages.length === 0) {
       return Response.json({ error: "No messages." }, { status: 400 });
     }
-    // Google Search grounding — lets Gemini look things up on the web for
-    // current/outside info. Only attach it for Google models (the tool is
-    // provider-executed by Gemini; the call still routes via the AI Gateway).
-    const useSearch = CHAT_MODEL.startsWith("google/");
-    // Cast bridges a generic mismatch between @ai-sdk/google and ai core; the
-    // tool shape is correct at runtime.
-    const tools = useSearch
+    const model = useClaude ? CHAT_CLAUDE_MODEL : CHAT_MODEL;
+    // Google Search grounding — lets Gemini look things up on the web. Only
+    // attach it for Google models (Claude can't use it). Cast bridges a generic
+    // mismatch between @ai-sdk/google and ai core; the shape is correct at runtime.
+    const tools = model.startsWith("google/")
       ? ({ google_search: google.tools.googleSearch({}) } as unknown as ToolSet)
       : undefined;
     const result = streamText({
-      model: CHAT_MODEL,
+      model,
       system: buildSystem(context ?? {}),
       messages,
       tools,

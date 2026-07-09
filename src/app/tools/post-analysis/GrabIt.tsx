@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v30";
+const TOOL_VERSION = "v31";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -980,6 +980,7 @@ function Results({
   const [visible, setVisible] = useState(PAGE);
   const [focused, setFocused] = useState<DisplayComment | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatUseClaude, setChatUseClaude] = useState(false);
 
   // Remember whether Ask Chat was left open across reloads.
   useEffect(() => {
@@ -990,9 +991,10 @@ function Results({
     }
   }, []);
 
-  function askAbout(c: DisplayComment) {
+  function askAbout(c: DisplayComment, opts?: { claude?: boolean }) {
     setFocused(c);
     setChatOpen(true); // make sure the (collapsed) chat opens
+    if (opts?.claude) setChatUseClaude(true); // brainstorm a Claude idea in Claude
     setTimeout(
       () =>
         document
@@ -1050,6 +1052,24 @@ function Results({
   const [useClaude, setUseClaude] = useState(false);
   const moreRound = useRef(0);
   const allBuildIdeas = [...buildIdeas, ...extraIdeas];
+  const ideasKey = `pa:extra-ideas:${post.url}`;
+
+  // Restore any previously-generated extra ideas for this post on reload.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ideasKey);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (Array.isArray(s.ideas) && s.ideas.length) {
+          setExtraIdeas(s.ideas);
+          moreRound.current = s.round ?? s.ideas.length;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.url]);
 
   async function generateMore() {
     if (moreLoading) return;
@@ -1092,8 +1112,19 @@ function Results({
           model: label,
         }),
       );
-      setExtraIdeas((prev) => [...prev, ...mapped]);
       moreRound.current += 1;
+      setExtraIdeas((prev) => {
+        const next = [...prev, ...mapped];
+        try {
+          localStorage.setItem(
+            ideasKey,
+            JSON.stringify({ ideas: next, round: moreRound.current }),
+          );
+        } catch {
+          /* snapshot too big — skip */
+        }
+        return next;
+      });
     } catch (e) {
       setMoreError(e instanceof Error ? e.message : "Failed to generate.");
     } finally {
@@ -1462,6 +1493,8 @@ function Results({
               focused={focused}
               onClearFocus={() => setFocused(null)}
               quickQuestions={analysis!.audienceQuestions}
+              useClaude={chatUseClaude}
+              onUseClaudeChange={setChatUseClaude}
             />
           </div>
         </details>
@@ -1556,12 +1589,16 @@ function ChatPanel({
   focused,
   onClearFocus,
   quickQuestions,
+  useClaude,
+  onUseClaudeChange,
 }: {
   post: ScrapedPost;
   analysis: Analysis;
   focused: DisplayComment | null;
   onClearFocus: () => void;
   quickQuestions?: string[];
+  useClaude?: boolean;
+  onUseClaudeChange?: (v: boolean) => void;
 }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -1702,7 +1739,11 @@ function ChatPanel({
       const res = await fetch("/api/grab-it/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next, context: buildContext() }),
+        body: JSON.stringify({
+          messages: next,
+          context: buildContext(),
+          useClaude: !!useClaude,
+        }),
       });
       if (!res.ok || !res.body) {
         const e = await res.json().catch(() => ({}));
@@ -1817,11 +1858,29 @@ function ChatPanel({
             </div>
           )}
         </div>
-        {threads.length > 0 && (
-          <span className="shrink-0 text-[11px] text-subtle">
-            {threads.length} saved
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {onUseClaudeChange && (
+            <button
+              onClick={() => onUseClaudeChange(!useClaude)}
+              title="Chat with Claude Sonnet 5 (best quality) — needs AI Gateway credits; loses web search"
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                useClaude
+                  ? "border-accent bg-accent text-bg"
+                  : "border-border bg-panel text-muted hover:border-accent hover:text-fg"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${useClaude ? "bg-bg" : "bg-subtle"}`}
+              />
+              Claude
+            </button>
+          )}
+          {threads.length > 0 && (
+            <span className="text-[11px] text-subtle">
+              {threads.length} saved
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Conversation card — clean, ChatGPT-style */}
