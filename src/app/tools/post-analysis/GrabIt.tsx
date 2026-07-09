@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v33";
+const TOOL_VERSION = "v35";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -403,7 +403,7 @@ export function GrabIt() {
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && url && !busy && run()}
               placeholder="Paste a link — Instagram, TikTok, Reddit, X, Facebook, YouTube…"
-              className="flex-1 rounded-lg border border-border bg-elevated px-3.5 py-2.5 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
+              className="flex-1 rounded-lg border border-border bg-elevated px-3.5 py-3 text-base text-fg placeholder:text-subtle focus:border-accent focus:outline-none sm:py-2.5 sm:text-sm"
             />
             <button
               onClick={run}
@@ -1264,7 +1264,7 @@ function Results({
             : ""
         })`}
       >
-        <div className="mb-4 flex flex-wrap items-center justify-end gap-2 text-xs text-muted">
+        <div className="mb-4 flex flex-wrap items-center justify-start gap-2 text-xs text-muted sm:justify-end">
             {hasRelevant && (
               <button
                 onClick={() => setRelevantOnly((v) => !v)}
@@ -1387,6 +1387,7 @@ function Results({
                 idea={idea}
                 commentById={commentById}
                 onAsk={askAbout}
+                storageId={`idea:${post.url}:${idea.title}`}
               />
             ))}
           </div>
@@ -1404,7 +1405,7 @@ function Results({
                     onClick={() => setIdeaCount(n)}
                     disabled={moreLoading}
                     title={`Generate ${n} idea${n === 1 ? "" : "s"}`}
-                    className={`h-7 w-7 rounded-full text-xs font-medium transition-colors disabled:opacity-60 ${
+                    className={`h-8 w-8 rounded-full text-sm font-medium transition-colors disabled:opacity-60 ${
                       ideaCount === n
                         ? "bg-accent text-bg"
                         : "text-muted hover:text-fg"
@@ -1870,11 +1871,11 @@ function ChatPanel({
   return (
     <div className="flex flex-col">
       {/* Compact toolbar: new chat + thread switcher */}
-      <div className="mb-2.5 flex items-center justify-between gap-2">
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <button
             onClick={newChat}
-            className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-accent hover:text-fg"
+            className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-panel px-3.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-accent hover:text-fg"
           >
             <span className="text-sm leading-none">＋</span> New chat
           </button>
@@ -1927,7 +1928,7 @@ function ChatPanel({
       {/* Conversation card — clean, ChatGPT-style */}
       <div
         ref={listRef}
-        className="min-h-[240px] max-h-[52vh] space-y-6 overflow-y-auto rounded-2xl border border-border bg-bg p-4"
+        className="max-h-[62vh] min-h-[280px] space-y-6 overflow-y-auto rounded-2xl border border-border bg-bg p-3.5 sm:max-h-[52vh] sm:min-h-[240px] sm:p-4"
       >
         {messages.length === 0 ? (
           <div className="flex min-h-[200px] flex-col items-center justify-center gap-4 text-center">
@@ -2033,18 +2034,18 @@ function ChatPanel({
             focused ? `Ask about @${focused.author}'s comment…` : "Ask anything…"
           }
           disabled={streaming}
-          className="flex-1 bg-transparent px-2 py-1.5 text-sm text-fg placeholder:text-subtle focus:outline-none disabled:opacity-60"
+          className="flex-1 bg-transparent px-2 py-2 text-base text-fg placeholder:text-subtle focus:outline-none disabled:opacity-60 sm:text-sm"
         />
         <button
           onClick={() => send()}
           disabled={streaming || !input.trim()}
           aria-label="Send"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-bg transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
         >
           {streaming ? (
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-bg border-t-transparent" />
+            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-bg border-t-transparent" />
           ) : (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="19" x2="12" y2="5" />
               <polyline points="5 12 12 5 19 12" />
             </svg>
@@ -2215,87 +2216,127 @@ function BuildIdeaCard({
   idea,
   commentById,
   onAsk,
+  storageId,
 }: {
   idea: BuildIdea;
   commentById: Map<string, ScrapedComment>;
-  onAsk: (c: DisplayComment) => void;
+  onAsk: (c: DisplayComment, opts?: { claude?: boolean }) => void;
+  storageId?: string;
 }) {
   const sources = idea.sourceCommentIds
     .map((id) => commentById.get(id))
     .filter((c): c is ScrapedComment => !!c);
   const modelLabel = idea.model ?? "Gemini Flash";
   const isClaude = /claude/i.test(modelLabel);
+  // Start closed so the initial <details> render doesn't fire a toggle that
+  // clobbers a saved "collapsed" state; the effect sets the real state
+  // (default open unless it was collapsed before).
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let v: string | null = null;
+    try {
+      if (storageId) v = localStorage.getItem(`pa:card:${storageId}`);
+    } catch {
+      /* ignore */
+    }
+    setOpen(v === null ? true : v === "1");
+  }, [storageId]);
   return (
-    <div className="rounded-xl border border-border bg-elevated p-4">
-      <div className="flex items-start justify-between gap-3">
-        <h4 className="text-sm font-semibold text-fg">{idea.title}</h4>
-        <span
-          className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
-            isClaude
-              ? "border-accent/40 bg-accent/10 text-accent"
-              : "border-border bg-panel text-subtle"
-          }`}
-          title={`Generated by ${modelLabel}`}
-        >
-          {modelLabel}
-        </span>
-      </div>
-      <p className="mt-1 text-sm text-muted">{idea.whatItIs}</p>
-
-      {idea.howToBuild.length > 0 && (
-        <div className="mt-3">
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-subtle">
-            How to start
-          </p>
-          <ol className="list-decimal space-y-1 pl-5 text-sm text-fg">
-            {idea.howToBuild.map((s, i) => (
-              <li key={i}>{s}</li>
-            ))}
-          </ol>
-        </div>
-      )}
-
-      {idea.insight && (
-        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-xs text-muted">
-          <span className="font-medium text-fg">Why: </span>
-          {idea.insight}
-        </p>
-      )}
-
-      {sources.length > 0 && (
-        <div className="mt-3 space-y-1.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-subtle">
-            Sparked by
-          </p>
-          {sources.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => onAsk(c)}
-              className="block w-full rounded-lg border border-border bg-bg px-3 py-1.5 text-left text-xs text-muted transition-colors hover:border-accent"
-            >
-              <span className="font-medium text-fg">@{c.author}</span>:{" "}
-              {c.text.length > 160 ? `${c.text.slice(0, 160)}…` : c.text}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-3 flex justify-end">
-        <button
-          onClick={() =>
-            onAsk({
-              id: `idea-${idea.title}`,
-              author: "build idea",
-              text: `Help me build this: "${idea.title}" — ${idea.whatItIs}`,
-              likes: 0,
-            })
+    <details
+      open={open}
+      onToggle={(e) => {
+        const o = e.currentTarget.open;
+        setOpen(o);
+        if (storageId) {
+          try {
+            localStorage.setItem(`pa:card:${storageId}`, o ? "1" : "0");
+          } catch {
+            /* ignore */
           }
-          className="rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
-        >
-          Brainstorm this in chat →
-        </button>
+        }
+      }}
+      className="group overflow-hidden rounded-xl border border-border bg-elevated"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+        <h4 className="min-w-0 text-sm font-semibold text-fg">{idea.title}</h4>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={`rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+              isClaude
+                ? "border-accent/40 bg-accent/10 text-accent"
+                : "border-border bg-panel text-subtle"
+            }`}
+            title={`Generated by ${modelLabel}`}
+          >
+            {modelLabel}
+          </span>
+          <span className="text-subtle transition-transform group-open:rotate-180">
+            ⌄
+          </span>
+        </div>
+      </summary>
+
+      <div className="border-t border-border px-4 pb-4 pt-3">
+        <p className="text-sm text-muted">{idea.whatItIs}</p>
+
+        {idea.howToBuild.length > 0 && (
+          <div className="mt-3">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-subtle">
+              How to start
+            </p>
+            <ol className="list-decimal space-y-1 pl-5 text-sm text-fg">
+              {idea.howToBuild.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ol>
+          </div>
+        )}
+
+        {idea.insight && (
+          <p className="mt-3 rounded-lg bg-bg px-3 py-2 text-xs text-muted">
+            <span className="font-medium text-fg">Why: </span>
+            {idea.insight}
+          </p>
+        )}
+
+        {sources.length > 0 && (
+          <div className="mt-3 space-y-1.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-subtle">
+              Sparked by
+            </p>
+            {sources.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => onAsk(c)}
+                className="block w-full rounded-lg border border-border bg-bg px-3 py-1.5 text-left text-xs text-muted transition-colors hover:border-accent"
+              >
+                <span className="font-medium text-fg">@{c.author}</span>:{" "}
+                {c.text.length > 160 ? `${c.text.slice(0, 160)}…` : c.text}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={() =>
+              onAsk(
+                {
+                  id: `idea-${idea.title}`,
+                  author: "build idea",
+                  text: `Help me build this: "${idea.title}" — ${idea.whatItIs}`,
+                  likes: 0,
+                },
+                { claude: isClaude },
+              )
+            }
+            className="rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
+          >
+            Brainstorm this in chat →
+          </button>
+        </div>
       </div>
-    </div>
+    </details>
   );
 }
 

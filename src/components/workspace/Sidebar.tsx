@@ -125,7 +125,7 @@ export function Sidebar({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search tools…"
-          className="w-full rounded-lg border border-border bg-elevated px-3 py-2 text-xs text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
+          className="w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-base text-fg placeholder:text-subtle focus:border-accent focus:outline-none sm:py-2 sm:text-xs"
         />
       </div>
 

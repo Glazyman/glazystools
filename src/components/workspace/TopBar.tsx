@@ -19,29 +19,27 @@ export function TopBar({ onMenu }: { onMenu?: () => void }) {
   const parts = crumbs(pathname);
 
   return (
-    <header className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-bg px-3 sm:px-4">
-      <div className="flex min-w-0 items-center gap-2 text-sm">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-bg px-2 sm:h-12 sm:px-5">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-2.5">
         {/* Hamburger — mobile only (desktop toggle lives in the sidebar) */}
         <button
           aria-label="Open menu"
           onClick={onMenu}
-          className="-ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-fg md:hidden"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-fg transition-colors hover:bg-hover active:bg-hover md:hidden"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <line x1="3" y1="6" x2="21" y2="6" />
             <line x1="3" y1="12" x2="21" y2="12" />
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
         {parts.map((p, i) => (
-          <span key={i} className="flex items-center gap-2">
+          <span key={i} className="flex min-w-0 items-center gap-2">
             {i > 0 && <span className="text-subtle">/</span>}
             <span
-              className={
-                i === parts.length - 1
-                  ? "font-mono text-xs uppercase tracking-wider text-fg"
-                  : "font-mono text-xs uppercase tracking-wider text-muted"
-              }
+              className={`truncate font-mono text-[13px] uppercase tracking-wider sm:text-xs ${
+                i === parts.length - 1 ? "text-fg" : "hidden text-muted sm:inline"
+              }`}
             >
               {p}
             </span>
