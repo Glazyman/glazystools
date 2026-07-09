@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v31";
+const TOOL_VERSION = "v32";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1618,8 +1618,18 @@ function ChatPanel({
     }
   }, [post.url]);
 
-  // On opening a run, load its most recent chat thread (continue where you left
-  // off). Start a fresh one with "New chat".
+  // Remembers which chat you were on (a thread id, or "new") so a reload keeps
+  // you there instead of jumping back to the most recent thread.
+  const chatKey = `pa:chat-active:${post.url}`;
+  const saveActive = (v: string) => {
+    try {
+      localStorage.setItem(chatKey, v);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // On opening a run, restore the chat you were last on (new or a past thread).
   useEffect(() => {
     setError(null);
     let cancelled = false;
@@ -1628,12 +1638,28 @@ function ChatPanel({
         const t = await listChats(post.url);
         if (cancelled) return;
         setThreads(t);
-        if (t.length) {
-          const full = await getChat(t[0].id);
+        let active: string | null = null;
+        try {
+          active = localStorage.getItem(chatKey);
+        } catch {
+          /* ignore */
+        }
+        // Explicit "new chat" — start empty.
+        if (active === "new") {
+          setMessages([]);
+          threadIdRef.current = null;
+          setThreadId(null);
+          return;
+        }
+        // The saved thread if it still exists, else the most recent.
+        const pick =
+          active && t.some((x) => x.id === active) ? active : (t[0]?.id ?? null);
+        if (pick) {
+          const full = await getChat(pick);
           if (cancelled) return;
           setMessages(full.messages ?? []);
-          threadIdRef.current = t[0].id;
-          setThreadId(t[0].id);
+          threadIdRef.current = pick;
+          setThreadId(pick);
         } else {
           setMessages([]);
           threadIdRef.current = null;
@@ -1646,6 +1672,7 @@ function ChatPanel({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.url]);
 
   useEffect(() => {
@@ -1670,6 +1697,7 @@ function ChatPanel({
         const id = await createChat(post.url, msgs);
         threadIdRef.current = id;
         setThreadId(id);
+        saveActive(id); // a new chat becomes the active one once it's saved
         refreshThreads();
       }
     } catch {
@@ -1691,6 +1719,7 @@ function ChatPanel({
     setError(null);
     threadIdRef.current = null;
     setThreadId(null);
+    saveActive("new");
   }
 
   async function openThread(id: string) {
@@ -1701,6 +1730,7 @@ function ChatPanel({
       setMessages(full.messages ?? []);
       threadIdRef.current = id;
       setThreadId(id);
+      saveActive(id);
     } catch {
       setError("Couldn't load that chat.");
     }
