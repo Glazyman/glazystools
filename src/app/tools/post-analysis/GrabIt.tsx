@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v22";
+const TOOL_VERSION = "v23";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1231,26 +1231,11 @@ function Results({
           </Collapsible>
 
           <Collapsible
-            title="💡 Ideas & follow-ups worth making"
-            count={analysis!.followUpIdeas.length}
-            accent
+            title="What people are asking"
+            count={analysis!.audienceQuestions.length}
           >
-            <BulletList items={analysis!.followUpIdeas} />
+            <BulletList items={analysis!.audienceQuestions} />
           </Collapsible>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Collapsible
-              title="What people are asking"
-              count={analysis!.audienceQuestions.length}
-            >
-              <BulletList items={analysis!.audienceQuestions} />
-            </Collapsible>
-            <Collapsible
-              title="What's missing / wanted more"
-              count={analysis!.gaps.length}
-            >
-              <BulletList items={analysis!.gaps} />
-            </Collapsible>
-          </div>
         </>
       )}
 
