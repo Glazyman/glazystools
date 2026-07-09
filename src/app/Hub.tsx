@@ -1,23 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { tools } from "@/lib/tools";
 
 const statusLabel: Record<string, string> = {
   live: "Live",
-  wip: "In progress",
+  wip: "Building",
   planned: "Planned",
 };
 const statusDot: Record<string, string> = {
-  live: "bg-emerald-500",
-  wip: "bg-amber-500",
-  planned: "bg-subtle",
+  live: "bg-live",
+  wip: "bg-wip",
+  planned: "bg-planned",
 };
 
 // The home hub: a searchable launcher for every tool you build.
 export function Hub() {
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // ⌘K / Ctrl-K focuses the search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -31,104 +44,170 @@ export function Hub() {
 
   const categories = Object.keys(grouped);
   const matchCount = categories.reduce((n, c) => n + grouped[c].length, 0);
+  const liveCount = tools.filter((t) => t.status === "live").length;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
-      {/* Hero */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Glazy&apos;s Tools</h1>
-        <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-          Your hub for everything you build. Search, launch, and keep it all in
-          one place.
+    <div className="grain relative min-h-full overflow-hidden">
+      {/* Decorative glows */}
+      <div
+        className="glow"
+        style={{
+          width: 520,
+          height: 520,
+          top: -180,
+          right: -120,
+          background: "rgba(216,255,62,0.10)",
+        }}
+      />
+      <div
+        className="glow"
+        style={{
+          width: 420,
+          height: 420,
+          top: 120,
+          left: -160,
+          background: "rgba(255,106,61,0.08)",
+        }}
+      />
+
+      <div className="relative z-10 mx-auto max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+        {/* Eyebrow */}
+        <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.3em] text-subtle">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
+          Workspace
+          <span className="text-subtle">/</span>
+          {tools.length} tool{tools.length === 1 ? "" : "s"}
+        </div>
+
+        {/* Hero */}
+        <h1 className="mt-6 font-display text-[clamp(3rem,9vw,7rem)] font-normal leading-[0.92] tracking-tight text-fg">
+          Glazy&apos;s{" "}
+          <em className="italic text-accent">Tools</em>
+          <span className="text-subtle">.</span>
+        </h1>
+        <p className="mt-6 max-w-xl text-lg font-light leading-relaxed text-muted">
+          One desk for everything you build — search, launch, and keep your
+          AI-powered tools in a single place.
         </p>
-      </div>
 
-      {/* Search + stats */}
-      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <svg
-            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-subtle"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your tools…"
-            className="w-full rounded-xl border border-border bg-panel py-3 pl-10 pr-4 text-sm text-fg shadow-card placeholder:text-subtle focus:border-accent focus:outline-none"
-          />
+        {/* Search */}
+        <div className="mt-9 max-w-2xl">
+          <div className="group flex items-center gap-3 rounded-2xl border border-border bg-panel px-4 py-3.5 shadow-card transition-colors focus-within:border-accent">
+            <svg
+              className="pointer-events-none shrink-0 text-subtle"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search the desk — try 'post' or 'ideas'…"
+              className="flex-1 bg-transparent text-base text-fg placeholder:text-subtle focus:outline-none"
+            />
+            <kbd className="hidden shrink-0 rounded border border-border px-2 py-1 font-mono text-[10px] text-subtle sm:inline">
+              ⌘K
+            </kbd>
+          </div>
+          {/* Status line */}
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] uppercase tracking-wider text-subtle">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-live" />
+              All systems nominal
+            </span>
+            <span>
+              {liveCount} live · {tools.length} total
+            </span>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
-          <span className="rounded-full border border-border bg-panel px-3 py-1.5 shadow-card">
-            {tools.length} tool{tools.length === 1 ? "" : "s"}
-          </span>
-          <span className="rounded-full border border-border bg-panel px-3 py-1.5 shadow-card">
-            {tools.filter((t) => t.status === "live").length} live
-          </span>
+
+        {/* Tool grid, grouped by category as numbered chapters */}
+        <div className="mt-16">
+          {matchCount === 0 ? (
+            <div className="grid-bg flex flex-col items-center justify-center rounded-2xl border border-dashed border-border-strong px-6 py-20 text-center">
+              <p className="text-sm text-muted">
+                {tools.length === 0
+                  ? "No tools yet. Tell Claude what to build first — it'll show up here."
+                  : `Nothing matches "${query}".`}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-16">
+              {categories.map((cat, ci) => (
+                <section key={cat}>
+                  <div className="mb-6 flex items-baseline gap-4 border-b border-border pb-4">
+                    <span className="font-mono text-xs tracking-widest text-subtle">
+                      {String(ci + 1).padStart(2, "0")}
+                    </span>
+                    <h2 className="font-display text-3xl tracking-tight text-fg sm:text-4xl">
+                      {cat}
+                    </h2>
+                    <span className="ml-auto font-mono text-[11px] uppercase tracking-wider text-subtle">
+                      {grouped[cat].length} tool
+                      {grouped[cat].length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {grouped[cat].map((tool) => (
+                      <Link
+                        key={tool.slug}
+                        href={`/tools/${tool.slug}`}
+                        className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-panel p-5 transition-all duration-300 hover:-translate-y-1 hover:border-accent/45 hover:shadow-card"
+                      >
+                        {/* hover glow */}
+                        <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(130%_80%_at_50%_-30%,rgba(216,255,62,0.10),transparent_60%)] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+
+                        <div className="relative mb-4 flex items-center justify-between">
+                          {tool.icon ? (
+                            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-elevated text-lg">
+                              {tool.icon}
+                            </span>
+                          ) : (
+                            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-accent/30 bg-accent/10 font-display text-lg italic text-accent">
+                              {tool.name.slice(0, 1)}
+                            </span>
+                          )}
+                          <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-subtle">
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${statusDot[tool.status] ?? "bg-planned"}`}
+                            />
+                            {statusLabel[tool.status] ?? tool.status}
+                          </span>
+                        </div>
+
+                        <h3 className="relative text-base font-semibold tracking-tight text-fg transition-colors group-hover:text-accent">
+                          {tool.name}
+                        </h3>
+                        <p className="relative mt-1.5 text-sm font-light leading-relaxed text-muted">
+                          {tool.tagline}
+                        </p>
+
+                        <div className="relative mt-5 flex items-center justify-between border-t border-white/5 pt-4 font-mono text-[11px] text-subtle">
+                          <span className="uppercase tracking-wider">
+                            {tool.category}
+                          </span>
+                          <span className="text-accent opacity-0 transition-opacity group-hover:opacity-100">
+                            open →
+                          </span>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Tool grid, grouped by category */}
-      {matchCount === 0 ? (
-        <div className="grid-bg flex flex-col items-center justify-center rounded-2xl border border-dashed border-border-strong px-6 py-20 text-center shadow-card">
-          <p className="text-sm text-muted">
-            {tools.length === 0
-              ? "No tools yet. Tell Claude what to build first — it'll show up here."
-              : `Nothing matches "${query}".`}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-8">
-          {categories.map((cat) => (
-            <section key={cat}>
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-subtle">
-                {cat}
-              </h2>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {grouped[cat].map((tool) => (
-                  <Link
-                    key={tool.slug}
-                    href={`/tools/${tool.slug}`}
-                    className="group flex flex-col rounded-2xl border border-border bg-panel p-5 shadow-card transition-all hover:-translate-y-0.5 hover:border-accent/50"
-                  >
-                    <div className="mb-3 flex items-center justify-between">
-                      {tool.icon ? (
-                        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-elevated text-lg">
-                          {tool.icon}
-                        </span>
-                      ) : (
-                        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-sm font-semibold text-accent">
-                          {tool.name.slice(0, 1)}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-subtle">
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${statusDot[tool.status] ?? "bg-subtle"}`}
-                        />
-                        {statusLabel[tool.status]}
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-semibold text-fg group-hover:text-accent">
-                      {tool.name}
-                    </h3>
-                    <p className="mt-1 text-xs leading-relaxed text-muted">
-                      {tool.tagline}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

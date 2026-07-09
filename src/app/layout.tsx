@@ -1,15 +1,25 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Fraunces, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Editorial display serif (optical sizing + italics for accent words).
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  axes: ["opsz"],
+});
+
+// Clean body/UI sans.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+// Monospace for eyebrows, labels, and metadata.
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jbmono",
   subsets: ["latin"],
 });
 
@@ -21,7 +31,7 @@ export const metadata: Metadata = {
 export const viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0b0d10",
+  themeColor: "#0b0b0d",
 };
 
 export default function RootLayout({
@@ -32,7 +42,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full" suppressHydrationWarning>
         <WorkspaceShell>{children}</WorkspaceShell>
