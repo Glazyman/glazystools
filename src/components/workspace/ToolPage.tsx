@@ -19,7 +19,7 @@ export function ToolPage({
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-4 sm:px-8 sm:py-5">
-        <div className="flex w-full flex-col items-start justify-between gap-3 sm:flex-row sm:items-start sm:gap-4">
+        <div className="mx-auto flex w-full max-w-6xl flex-col items-start justify-between gap-3 sm:flex-row sm:items-start sm:gap-4">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             {tool.icon && (
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-elevated text-xl sm:h-11 sm:w-11 sm:text-2xl">
@@ -46,7 +46,7 @@ export function ToolPage({
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="w-full px-4 py-6 sm:px-8 sm:py-8">
+        <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
           {children}
         </div>
       </div>
