@@ -15,8 +15,6 @@ const FREE_IDEAS_MODEL =
 const CLAUDE_MODEL =
   process.env.GRAB_IT_IDEAS_MODEL ?? "anthropic/claude-sonnet-5";
 
-const IDEAS_PER_REQUEST = 3;
-
 // Each successive request goes broader — from obvious/on-topic to ambitious and
 // cross-industry — so "generate more" keeps surfacing new territory.
 const BREADTH = [
@@ -54,12 +52,15 @@ const schema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const { context, existing, round, useClaude } = (await req.json()) as {
-      context: Ctx;
-      existing: string[];
-      round: number;
-      useClaude?: boolean;
-    };
+    const { context, existing, round, useClaude, count } =
+      (await req.json()) as {
+        context: Ctx;
+        existing: string[];
+        round: number;
+        useClaude?: boolean;
+        count?: number;
+      };
+    const n = Math.max(1, Math.min(4, Math.round(Number(count) || 3)));
 
     const level = BREADTH[Math.min(round ?? 0, BREADTH.length - 1)];
     const comments = (context.comments ?? []).slice(0, 40).join("\n");
@@ -70,7 +71,7 @@ export async function POST(req: Request) {
 
     const researchPrompt = [
       "You are an entrepreneurial research analyst. Use web search to ground your thinking in CURRENT, real market context (existing tools, competitors, demand signals, how others have done it).",
-      `Brainstorm ${IDEAS_PER_REQUEST} genuinely DISTINCT build/business ideas a creator could act on.`,
+      `Brainstorm exactly ${n} genuinely DISTINCT build/business ideas a creator could act on.`,
       "",
       `VIDEO by @${context.author ?? "unknown"}`,
       `SUMMARY: ${context.summary ?? "(none)"}`,

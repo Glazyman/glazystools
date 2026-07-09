@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v32";
+const TOOL_VERSION = "v33";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1050,6 +1050,7 @@ function Results({
   const [moreError, setMoreError] = useState<string | null>(null);
   const [moreNote, setMoreNote] = useState<string | null>(null);
   const [useClaude, setUseClaude] = useState(false);
+  const [ideaCount, setIdeaCount] = useState(3);
   const moreRound = useRef(0);
   const allBuildIdeas = [...buildIdeas, ...extraIdeas];
   const ideasKey = `pa:extra-ideas:${post.url}`;
@@ -1092,6 +1093,7 @@ function Results({
           existing: allBuildIdeas.map((b) => b.title),
           round: moreRound.current,
           useClaude,
+          count: ideaCount,
         }),
       });
       const data = await res.json();
@@ -1298,17 +1300,15 @@ function Results({
             </div>
             {mode === "scored" && (
               <>
-                <select
+                <Dropdown
+                  align="right"
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="rounded border border-border bg-elevated px-2 py-1 text-xs text-fg focus:outline-none"
-                >
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c === "all" ? "all categories" : c}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setCategory}
+                  options={categories.map((c) => ({
+                    value: c,
+                    label: c === "all" ? "all categories" : c,
+                  }))}
+                />
                 <label className="flex items-center gap-1.5">
                   min
                   <input
@@ -1396,6 +1396,24 @@ function Results({
 
           <div className="mt-4 flex flex-col items-center gap-2.5">
             <div className="flex flex-wrap items-center justify-center gap-2">
+              {/* How many ideas to generate (1-4) */}
+              <div className="flex items-center gap-1 rounded-full border border-border bg-elevated p-0.5">
+                {[1, 2, 3, 4].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setIdeaCount(n)}
+                    disabled={moreLoading}
+                    title={`Generate ${n} idea${n === 1 ? "" : "s"}`}
+                    className={`h-7 w-7 rounded-full text-xs font-medium transition-colors disabled:opacity-60 ${
+                      ideaCount === n
+                        ? "bg-accent text-bg"
+                        : "text-muted hover:text-fg"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
               <button
                 onClick={generateMore}
                 disabled={moreLoading}
@@ -1404,10 +1422,12 @@ function Results({
                 {moreLoading ? (
                   <>
                     <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                    Researching more ideas…
+                    Researching {ideaCount} idea{ideaCount === 1 ? "" : "s"}…
                   </>
                 ) : (
-                  <>↻ Generate more ideas</>
+                  <>
+                    ↻ Generate {ideaCount} idea{ideaCount === 1 ? "" : "s"}
+                  </>
                 )}
               </button>
               <button
@@ -1859,33 +1879,24 @@ function ChatPanel({
             <span className="text-sm leading-none">＋</span> New chat
           </button>
           {threads.length > 0 && (
-            <div className="relative min-w-0">
-              <select
-                value={threadId ?? ""}
-                onChange={(e) => {
-                  if (e.target.value) openThread(e.target.value);
-                  else newChat();
-                }}
-                className="max-w-[220px] cursor-pointer appearance-none truncate rounded-full border border-border bg-panel py-1 pl-3 pr-7 text-xs font-medium text-muted transition-colors hover:border-accent hover:text-fg focus:border-accent focus:text-fg focus:outline-none"
-              >
-                <option value="">Current chat</option>
-                {threads.map((t) => {
+            <Dropdown
+              className="min-w-0 max-w-[220px]"
+              value={threadId ?? ""}
+              onChange={(v) => (v ? openThread(v) : newChat())}
+              options={[
+                { value: "", label: "Current chat" },
+                ...threads.map((t) => {
                   const label = t.title?.trim() || "Untitled chat";
-                  const short =
-                    label.length > 30
-                      ? `${label.slice(0, 29).trimEnd()}…`
-                      : label;
-                  return (
-                    <option key={t.id} value={t.id} title={label}>
-                      {short}
-                    </option>
-                  );
-                })}
-              </select>
-              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-subtle">
-                ⌄
-              </span>
-            </div>
+                  return {
+                    value: t.id,
+                    label:
+                      label.length > 40
+                        ? `${label.slice(0, 39).trimEnd()}…`
+                        : label,
+                  };
+                }),
+              ]}
+            />
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -2058,6 +2069,78 @@ function ScoreBadge({ score }: { score: number }) {
     >
       {score}
     </span>
+  );
+}
+
+// A custom dropdown that matches the page theme (native <select> menus are
+// OS-styled and can't be themed). Button + styled popover list.
+function Dropdown({
+  value,
+  onChange,
+  options,
+  placeholder,
+  className,
+  align = "left",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  className?: string;
+  align?: "left" | "right";
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const current = options.find((o) => o.value === value);
+  return (
+    <div ref={ref} className={`relative ${className ?? ""}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 rounded-full border border-border bg-panel py-1 pl-3 pr-2.5 text-xs font-medium text-muted transition-colors hover:border-accent hover:text-fg"
+      >
+        <span className="truncate">{current?.label ?? placeholder}</span>
+        <span
+          className={`shrink-0 text-[10px] text-subtle transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          ⌄
+        </span>
+      </button>
+      {open && (
+        <div
+          className={`absolute z-30 mt-1 max-h-64 min-w-full overflow-auto rounded-xl border border-border bg-panel p-1 shadow-card ${
+            align === "right" ? "right-0" : "left-0"
+          }`}
+        >
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              title={o.label}
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+              className={`block w-full truncate rounded-lg px-3 py-1.5 text-left text-xs transition-colors ${
+                o.value === value
+                  ? "bg-hover text-fg"
+                  : "text-muted hover:bg-hover hover:text-fg"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
