@@ -47,7 +47,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v16";
+const TOOL_VERSION = "v17";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1506,19 +1506,60 @@ function ChatPanel({
       const dec = new TextDecoder();
       setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
-      // Paint each chunk to the screen the instant it arrives.
-      let full = "";
+      // Reveal the answer word-by-word. The network delivers bursty chunks; we
+      // buffer them into `full` and paint one word at a time on a steady tick
+      // (catching up when a big backlog builds) so it reads like ChatGPT.
+      let full = ""; // text received from the network so far
+      let shown = 0; // chars painted on screen
+      let streamDone = false;
+      let last = 0; // timestamp of the last word revealed
+      const setLast = (content: string) =>
+        setMessages((m) => {
+          const cp = [...m];
+          cp[cp.length - 1] = { role: "assistant", content };
+          return cp;
+        });
+      // While still streaming, hold back the trailing (possibly incomplete)
+      // word until whitespace confirms it's done — avoids half-words flashing.
+      const safeEnd = () => {
+        if (streamDone) return full.length;
+        let i = full.length;
+        while (i > 0 && !/\s/.test(full[i - 1])) i--;
+        return i;
+      };
+      const reveal = (ts: number) => {
+        const end = safeEnd();
+        if (shown < end && ts - last >= 55) {
+          last = ts;
+          const words = full.slice(shown, end).trim().split(/\s+/).length;
+          let step = Math.max(1, Math.ceil(words / 8)); // catch up on backlog
+          let idx = shown;
+          while (step > 0 && idx < end) {
+            while (idx < end && /\s/.test(full[idx])) idx++; // skip spaces
+            while (idx < end && !/\s/.test(full[idx])) idx++; // consume a word
+            step--;
+          }
+          shown = idx;
+          setLast(full.slice(0, shown));
+        }
+        // Run only while there's a completed word waiting; otherwise pause and
+        // let the next chunk (or stream end) restart us — no idle CPU spin.
+        rafRef.current =
+          shown < safeEnd() ? requestAnimationFrame(reveal) : null;
+      };
+      const ensureReveal = () => {
+        if (rafRef.current == null) rafRef.current = requestAnimationFrame(reveal);
+      };
+
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         full += dec.decode(value, { stream: true });
-        setMessages((m) => {
-          const cp = [...m];
-          cp[cp.length - 1] = { role: "assistant", content: full };
-          return cp;
-        });
+        ensureReveal();
       }
       full += dec.decode();
+      streamDone = true;
+      ensureReveal(); // flush the final word(s)
       // Auto-save the thread once the answer is complete.
       await persist([...next, { role: "assistant", content: full }]);
     } catch (e) {
@@ -1530,61 +1571,81 @@ function ChatPanel({
   }
 
   return (
-    <div>
-      <p className="mb-3 text-xs text-muted">
-        Ask anything — understand the video, dig into a comment, brainstorm, or
-        figure out how to build on an idea. It can search the web too. Chats
-        auto-save.
-      </p>
-
-      {/* Thread switcher — separate chats, continue old ones */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button
-          onClick={newChat}
-          className="rounded-md border border-border bg-elevated px-2.5 py-1 text-xs text-muted transition-colors hover:border-accent hover:text-fg"
-        >
-          ＋ New chat
-        </button>
-        {threads.length > 0 && (
-          <select
-            value={threadId ?? ""}
-            onChange={(e) => {
-              if (e.target.value) openThread(e.target.value);
-              else newChat();
-            }}
-            className="max-w-[240px] rounded-md border border-border bg-elevated px-2 py-1 text-xs text-fg focus:outline-none"
+    <div className="flex flex-col">
+      {/* Compact toolbar: new chat + thread switcher */}
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            onClick={newChat}
+            className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-accent hover:text-fg"
           >
-            <option value="">Current chat</option>
-            {threads.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.title || "Untitled chat"}
-              </option>
-            ))}
-          </select>
+            <span className="text-sm leading-none">＋</span> New chat
+          </button>
+          {threads.length > 0 && (
+            <select
+              value={threadId ?? ""}
+              onChange={(e) => {
+                if (e.target.value) openThread(e.target.value);
+                else newChat();
+              }}
+              className="max-w-[200px] truncate rounded-full border border-border bg-panel px-3 py-1 text-xs text-fg focus:border-accent focus:outline-none"
+            >
+              <option value="">Current chat</option>
+              {threads.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.title || "Untitled chat"}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        {threads.length > 0 && (
+          <span className="shrink-0 text-[11px] text-subtle">
+            {threads.length} saved
+          </span>
         )}
-        <span className="text-[11px] text-subtle">
-          {threads.length} saved
-        </span>
       </div>
 
-      {messages.length > 0 && (
-        <div
-          ref={listRef}
-          className="mb-3 max-h-[460px] space-y-4 overflow-y-auto rounded-xl border border-border bg-bg p-3"
-        >
-          {messages.map((m, i) =>
+      {/* Conversation card — clean, ChatGPT-style */}
+      <div
+        ref={listRef}
+        className="min-h-[240px] max-h-[52vh] space-y-6 overflow-y-auto rounded-2xl border border-border bg-bg p-4"
+      >
+        {messages.length === 0 ? (
+          <div className="flex min-h-[200px] flex-col items-center justify-center gap-4 text-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent/12 text-lg text-accent">
+              ✦
+            </span>
+            <p className="max-w-xs text-sm text-muted">
+              Ask anything about this post — the video, a comment, or how to
+              build on an idea. It can search the web too.
+            </p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => send(s)}
+                  className="rounded-full border border-border bg-panel px-3 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-fg"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          messages.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
-                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-accent/15 px-3.5 py-2 text-sm text-fg">
+                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-accent/12 px-4 py-2.5 text-sm leading-relaxed text-fg">
                   {m.content}
                 </div>
               </div>
             ) : (
-              <div key={i} className="flex gap-2.5">
-                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[11px] text-accent">
+              <div key={i} className="flex gap-3">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/12 text-xs text-accent">
                   ✦
                 </span>
-                <div className="min-w-0 flex-1 rounded-2xl rounded-tl-sm border border-border bg-panel px-3.5 py-2.5">
+                <div className="min-w-0 flex-1 pt-0.5">
                   {m.content ? (
                     <div className="chat-md">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -1592,37 +1653,25 @@ function ChatPanel({
                       </ReactMarkdown>
                     </div>
                   ) : (
-                    <span className="inline-flex gap-1">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle [animation-delay:-0.2s]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle [animation-delay:-0.1s]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" />
+                    <span className="inline-flex items-center gap-2 text-xs text-subtle">
+                      <span className="inline-flex gap-1">
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle [animation-delay:-0.2s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle [animation-delay:-0.1s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" />
+                      </span>
+                      Thinking…
                     </span>
                   )}
                 </div>
               </div>
             ),
-          )}
-        </div>
-      )}
-
-      {/* Suggestions on an empty conversation */}
-      {messages.length === 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              onClick={() => send(s)}
-              className="rounded-full border border-border bg-elevated px-3 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-fg"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
+          )
+        )}
+      </div>
 
       {/* Focused-comment chip */}
       {focused && (
-        <div className="mb-2 flex items-center gap-2 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-xs">
+        <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/5 px-3 py-1.5 text-xs">
           <span className="min-w-0 flex-1 truncate text-muted">
             Asking about <span className="text-fg">@{focused.author}</span>: “
             {focused.text}”
@@ -1637,9 +1686,10 @@ function ChatPanel({
         </div>
       )}
 
-      {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
 
-      <div className="flex items-center gap-2 rounded-2xl border border-border bg-panel px-2 py-1.5 focus-within:border-accent">
+      {/* Input pill */}
+      <div className="mt-2.5 flex items-center gap-2 rounded-2xl border border-border bg-panel px-2.5 py-1.5 shadow-sm focus-within:border-accent">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
