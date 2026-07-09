@@ -9,6 +9,72 @@ obvious.
 
 ---
 
+## 2026-07-09 — Dark-editorial redesign + Post Analysis overhaul (v20 → v38)
+
+**Design system (21st.dev-inspired "mix of two directions"):** flipped the whole
+app to a **dark editorial** look. `globals.css` keeps the same semantic token
+names (so every component adopted it at once) but dark values: bg `#0b0b0d`,
+panel `#15151a`, elevated `#1b1b21`, lime `--accent #d8ff3e` (+ `--accent-strong`,
+`--accent-2 #ff6a3d`), status tokens `--live/--wip/--planned`. Fonts via
+`next/font`: **Fraunces** (`--font-fraunces`, display, italic accent words),
+**Inter** (`--font-inter`, body/`.font-display` uses Fraunces), **JetBrains Mono**
+(`--font-jbmono`, eyebrows/labels). `.grain` = absolute film-grain overlay,
+`.glow` = radial-gradient blobs (NOT `filter:blur` — that caused mobile
+drawer-open lag; see below).
+- Built via the **21st MCP plugin** (`/plugin install 21st@21st` → `/reload-plugins`;
+  needs `21st login`). `generate` in sketch mode returns multiple takes; `get_take`
+  copyPrompts are free. Used them as reference, rebuilt in our stack (zero code
+  pasted). 21st AI itself runs on Vercel AI Gateway.
+
+**Shell:** merged ActivityBar+Sidebar into ONE `Sidebar` (expanded panel /
+collapsed w-16 icon rail; single hamburger toggle fixed top-left; separator under
+Hub). Wordmark = **"Tool Box"**. `WorkspaceShell` persists collapsed state
+(localStorage `sidebar:collapsed`). TopBar taller on mobile + big menu button +
+`relative z-30` (so the Hub's overlay can't swallow the tap). Registry category
+"Content" → **"Tools"**. Hub hero = centered **"Tool Box."** (no subtitle/status).
+`ToolPage` full-width `max-w-6xl mx-auto`, text-only header, chevron far-right
+(title block is `w-full` so it stretches on mobile). `ScrollRestore` component
+persists scroll position per route (sessionStorage; suppresses saves during the
+restore window so it isn't clobbered; uses timestamp throttle not rAF so it works
+even backgrounded).
+
+**Post Analysis (`GrabIt.tsx`, TOOL_VERSION now v38):**
+- **Tabs:** New · Current run · @author · Saved. Finished run hides input, lives
+  under Current run. Current run + active tab + active chat thread all persist
+  across reload (localStorage). Sections reordered: transcript → comments → build
+  ideas → playbook → chat. Removed "What this post is about", "Ideas & follow-ups",
+  "What's missing", "Draft replies"; audience questions became chat quick-questions.
+- **Build ideas:** each idea is its own collapsible card (persists per-idea; fixed
+  an initial-`<details>`-toggle race that clobbered the saved state — start closed,
+  effect sets real state). Each card shows a **model badge** (Claude accent / Gemini
+  Flash muted). "Generate more ideas" button with a **1–4 count picker** and a
+  **Use Claude** toggle; extra ideas persist per post (`pa:extra-ideas:<url>`).
+- **Comment → ideas:** multi-select comments (checkbox) → floating bar (count +
+  Claude + Generate) combines them into ideas tagged "Sparked by" + model.
+- **Chat:** ChatGPT-style; markdown; word-by-word reveal; "Claude" toggle
+  (auto-on when brainstorming a Claude idea); **full-screen modal on mobile** (✕ to
+  close), inline card on desktop. Custom themed `Dropdown` replaces native
+  `<select>` (OS menus ignored the dark theme).
+- **Video:** centered, native aspect (9:16 reel stays 9:16), poster = play button
+  only; view-original + download moved beneath it.
+
+**Models (IMPORTANT — free tier reality):** Vercel AI Gateway **FREE tier only
+allows Gemini Flash** — Gemini 2.5 **Pro AND Claude both 403** ("Free tier users
+do not have access"). So analysis + idea research stay `google/gemini-2.5-flash`.
+"Use Claude" (`GRAB_IT_IDEAS_MODEL`, default `anthropic/claude-sonnet-5`) and chat
+Claude only work after adding **AI Gateway credits** (top-up in Vercel dashboard —
+NOT a pasted API key; everything routes via the Gateway OIDC token). Ideas/chat
+**auto-fall back to Flash** with a note if Claude is unavailable. `/api/grab-it/more-ideas`
+= 2-step: Flash+Google-Search research → structure/ideate (Flash or Claude); accepts
+`seeds[]`, `count`, `useClaude`. Claude can't read video, so `GRAB_IT_ANALYSIS_MODEL`
+must stay a Gemini (multimodal) model.
+
+**Mobile note:** the automation browser here won't render below ~1470px, so mobile
+is breakpoint-verified (`sm:`/`md:hidden`), not visually confirmed — ask the user
+to check on-device.
+
+---
+
 ## Project snapshot
 
 - **What it is:** a personal workspace / web-IDE that hosts many AI-powered tools.
