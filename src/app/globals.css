@@ -20,9 +20,9 @@
   --fg-muted: #6b7280;
   --fg-subtle: #99a1af;
 
-  /* Brand accent — olive green (dark enough for light text on buttons) */
-  --accent: #66802f;
-  --accent-strong: #56702a;
+  /* Brand accent — dark olive green */
+  --accent: #4a5d23;
+  --accent-strong: #3c4c1c;
 
   /* Soft card shadow */
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04),
