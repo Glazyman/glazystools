@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v21";
+const TOOL_VERSION = "v22";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -358,12 +358,11 @@ export function GrabIt() {
       ) : view === "current" && post ? (
         /* ── Current run output — no input, just the analysis ── */
         <>
-          {mode === "full" && <SaveIndicator state={saveState} />}
           {error && <ErrorBanner message={error} onRetry={retryAnalysis} />}
 
           {mode === "full" && (
             <ResultsBoundary>
-              <Results post={post} analysis={analysis} />
+              <Results post={post} analysis={analysis} saveState={saveState} />
             </ResultsBoundary>
           )}
           {mode === "transcript" && transcriptOnly && (
@@ -465,21 +464,6 @@ function TabButton({
       {children}
     </button>
   );
-}
-
-function SaveIndicator({ state }: { state: SaveState }) {
-  if (state === "idle") return null;
-  const map = {
-    saving: { text: "Saving to your library…", cls: "text-muted" },
-    saved: { text: "✓ Saved — find it in the Saved tab", cls: "text-emerald-700" },
-    error: {
-      text: "Couldn't save this run (it's still shown here).",
-      cls: "text-amber-700",
-    },
-  } as const;
-  const s = map[state as keyof typeof map];
-  if (!s) return null;
-  return <p className={`text-xs ${s.cls}`}>{s.text}</p>;
 }
 
 function SavedView({
@@ -808,50 +792,35 @@ function VideoPlayer({ post }: { post: ScrapedPost }) {
 
   if (playing && proxied && !playError) {
     return (
+      // No forced aspect: width-driven with auto height renders the video at
+      // its native format (a 9:16 reel stays 9:16).
       <video
         controls
         autoPlay
         playsInline
         src={proxied}
         onError={() => setPlayError(true)}
-        className="max-h-[460px] w-full rounded-lg bg-black object-contain"
+        className="block max-h-[80vh] w-full rounded-lg bg-black"
       />
     );
   }
 
   return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-lg border border-border bg-black/40 p-6 text-center">
+    <div className="flex aspect-[9/16] w-full flex-col items-center justify-center gap-3 rounded-lg border border-border bg-black/40 p-6 text-center">
       {proxied && !playError && (
         <button
           onClick={() => setPlaying(true)}
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-xl text-bg hover:bg-accent-strong"
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-xl text-bg transition-colors hover:bg-accent-strong"
           aria-label="Play video"
         >
           ▶
         </button>
       )}
       {playError && (
-        <p className="text-xs text-amber-700">
-          Playback failed — the source may have expired. Try the original link.
+        <p className="text-xs text-wip">
+          Playback failed — the source may have expired. Try the original link
+          below.
         </p>
-      )}
-      <a
-        href={post.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs text-accent hover:underline"
-      >
-        Open original ↗
-      </a>
-      {post.videoUrl && (
-        <a
-          href={`/api/grab-it/download?url=${encodeURIComponent(
-            post.videoUrl,
-          )}&name=${encodeURIComponent(`${post.author}-video`)}`}
-          className="text-xs text-muted hover:text-fg"
-        >
-          ⬇ download video
-        </a>
       )}
     </div>
   );
@@ -994,9 +963,11 @@ type DisplayComment = ScrapedComment & {
 function Results({
   post,
   analysis,
+  saveState,
 }: {
   post: ScrapedPost;
   analysis: Analysis | null;
+  saveState?: SaveState;
 }) {
   const hasAI = !!analysis;
   const mode = analysis?.scoringMode; // "scored" | "relevant" | undefined
@@ -1108,32 +1079,66 @@ function Results({
 
   return (
     <div className="space-y-6">
-      {/* Meta */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
-        <span className="font-medium text-fg">@{post.author}</span>
-        <span className="rounded bg-elevated px-1.5 py-0.5">
-          {KIND_BADGE[post.kind] ?? (post.videoUrl ? "🎥 Video" : "📝 Post")}
-        </span>
-        <span>{totalComments.toLocaleString()} comments</span>
-        {post.likes != null && <span>{post.likes.toLocaleString()} likes</span>}
-        {post.commentSource === "login" && (
-          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-700">
-            ✓ comments via login
-          </span>
+      {/* Centered post header — video, with meta beneath it */}
+      <div className="flex flex-col items-center text-center">
+        {saveState === "saved" && (
+          <div className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-live/30 bg-live/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-live">
+            ✓ Saved — find it under Saved
+          </div>
         )}
-        {post.commentSource === "logged-out" && (
-          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-700">
-            ⚠ logged-out fallback (limited)
-          </span>
-        )}
-        <a href={post.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-          view original ↗
-        </a>
-      </div>
 
-      {/* Media */}
-      <div className="w-full max-w-[320px]">
-        <MediaBlock post={post} />
+        <div className="w-full max-w-[300px]">
+          <MediaBlock post={post} />
+        </div>
+
+        <h2 className="mt-5 font-display text-2xl tracking-tight text-fg">
+          @{post.author}
+        </h2>
+
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs">
+          <span className="rounded-full border border-border bg-elevated px-3 py-1 text-muted">
+            {KIND_BADGE[post.kind] ?? (post.videoUrl ? "🎥 Video" : "📝 Post")}
+          </span>
+          <span className="rounded-full border border-border bg-elevated px-3 py-1 text-muted">
+            {totalComments.toLocaleString()} comments
+          </span>
+          {post.likes != null && (
+            <span className="rounded-full border border-border bg-elevated px-3 py-1 text-muted">
+              {post.likes.toLocaleString()} likes
+            </span>
+          )}
+          {post.commentSource === "login" && (
+            <span className="rounded-full border border-live/30 bg-live/10 px-3 py-1 text-live">
+              ✓ Comments via login
+            </span>
+          )}
+          {post.commentSource === "logged-out" && (
+            <span className="rounded-full border border-wip/30 bg-wip/10 px-3 py-1 text-wip">
+              ⚠ Logged-out (limited)
+            </span>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 font-mono text-[11px] uppercase tracking-wider text-subtle">
+          <a
+            href={post.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-colors hover:text-accent"
+          >
+            view original ↗
+          </a>
+          {post.videoUrl && (
+            <a
+              href={`/api/grab-it/download?url=${encodeURIComponent(
+                post.videoUrl,
+              )}&name=${encodeURIComponent(`${post.author}-video`)}`}
+              className="transition-colors hover:text-accent"
+            >
+              ⬇ download video
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Everything below is a collapsed dropdown — open what you want. */}
@@ -1200,7 +1205,7 @@ function Results({
                   <button
                     key={c.id}
                     onClick={() => askAbout(c)}
-                    className="block w-full rounded-xl border border-border bg-panel px-3.5 py-2.5 text-left transition-colors hover:border-accent"
+                    className="block w-full rounded-xl border border-border bg-elevated px-3.5 py-2.5 text-left transition-colors hover:border-accent"
                   >
                     <div className="mb-1 flex items-center gap-2 text-xs text-muted">
                       <span className="font-medium text-fg">@{c.author}</span>
@@ -1372,15 +1377,15 @@ function Results({
           id="grab-chat"
           open={chatOpen}
           onToggle={(e) => setChatOpen(e.currentTarget.open)}
-          className="group rounded-2xl border border-border bg-panel p-5 shadow-card"
+          className="group overflow-hidden rounded-xl border border-border bg-panel transition-colors open:border-border-strong"
         >
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-fg">
-            <span>💬 Ask Chat</span>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold tracking-tight text-fg">
+            <span>Ask Chat</span>
             <span className="text-subtle transition-transform group-open:rotate-180">
               ⌄
             </span>
           </summary>
-          <div className="mt-3">
+          <div className="border-t border-border px-5 pb-5 pt-4">
             <ChatPanel
               post={post}
               analysis={analysis!}
@@ -1392,12 +1397,19 @@ function Results({
       )}
 
       {hasAI && analysis!.draftComments.length > 0 && (
-        <details className="rounded-2xl border border-border bg-panel p-5 shadow-card">
-          <summary className="cursor-pointer text-sm font-semibold text-fg">
-            ✍️ Draft replies you could post{" "}
-            <span className="font-normal text-subtle">(optional)</span>
+        <details className="group overflow-hidden rounded-xl border border-border bg-panel transition-colors open:border-border-strong">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold tracking-tight text-fg">
+            <span>
+              Draft replies you could post{" "}
+              <span className="font-mono text-xs font-normal text-subtle">
+                optional
+              </span>
+            </span>
+            <span className="text-subtle transition-transform group-open:rotate-180">
+              ⌄
+            </span>
           </summary>
-          <div className="mt-3 space-y-2">
+          <div className="space-y-2 border-t border-border px-5 pb-5 pt-4">
             {analysis!.draftComments.map((c, i) => (
               <CopyRow key={i} text={c} />
             ))}
@@ -1915,25 +1927,33 @@ function Collapsible({
   defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
+  // Drop a leading emoji so section titles read clean and editorial.
+  const clean = title.replace(
+    /^\s*\p{Extended_Pictographic}(?:‍\p{Extended_Pictographic})*️?\s*/u,
+    "",
+  );
   return (
     <details
       open={defaultOpen}
-      className={`group rounded-2xl border p-5 shadow-card ${
-        accent ? "border-accent/30 bg-accent/5" : "border-border bg-panel"
-      }`}
+      className="group overflow-hidden rounded-xl border border-border bg-panel transition-colors open:border-border-strong"
     >
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-fg">
-        <span>
-          {title}
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+        <span className="flex items-center gap-2.5 text-sm font-semibold tracking-tight text-fg">
+          {accent && (
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+          )}
+          {clean}
           {count != null && (
-            <span className="ml-1.5 font-normal text-subtle">({count})</span>
+            <span className="font-mono text-xs font-normal text-subtle">
+              {count}
+            </span>
           )}
         </span>
         <span className="text-subtle transition-transform group-open:rotate-180">
           ⌄
         </span>
       </summary>
-      <div className="mt-3">{children}</div>
+      <div className="border-t border-border px-5 pb-5 pt-4">{children}</div>
     </details>
   );
 }
@@ -1951,7 +1971,7 @@ function BuildIdeaCard({
     .map((id) => commentById.get(id))
     .filter((c): c is ScrapedComment => !!c);
   return (
-    <div className="rounded-xl border border-border bg-panel p-4">
+    <div className="rounded-xl border border-border bg-elevated p-4">
       <h4 className="text-sm font-semibold text-fg">{idea.title}</h4>
       <p className="mt-1 text-sm text-muted">{idea.whatItIs}</p>
 
