@@ -121,6 +121,28 @@ obvious.
 - **Chat history:** `grab_it_chats` table (post_url, title, messages jsonb);
   `src/lib/grab-it/chats.ts` CRUD. Auto-saves each exchange; opening a run loads
   its most recent thread; "New chat" + thread dropdown to switch/continue.
+- **Streaming + UI polish (2026-07-08 → 09, ChatPanel in `GrabIt.tsx`, now v19):**
+  - **Word-by-word reveal.** Network chunks buffer into `full`; a RAF loop paints
+    one word per ~55ms tick (catches up on backlog via `ceil(words/8)`), holding
+    back the incomplete trailing word until whitespace confirms it. Loop only runs
+    while there's a buffered word AND pauses when caught up (restarts on next
+    chunk / stream end) — no idle CPU spin. LESSON: a self-rescheduling RAF loop
+    that runs while idle keeps the page "busy" and makes CDP/automation evals time
+    out (looks frozen but isn't) — always gate the loop on having work. Also:
+    background tabs throttle RAF, so the reveal stalls in a non-focused tab (fine
+    for real users). We tried char-by-char smooth streaming first; user disliked
+    it, reverted, then asked for word-by-word — that's what shipped.
+  - **Loading indicator.** Before first word: big pulsing accent "Thinking…" +
+    larger bouncing dots. While streaming: a live accent bouncing-dot row stays
+    under the text the whole response (continuous "still generating" cue), keyed
+    on `streaming && i === messages.length - 1`.
+  - **ChatGPT-style card.** Borderless full-width assistant messages with ✦
+    avatar, subtle right-aligned olive user bubbles, centered empty state with
+    suggestion pills inside the conversation card, compact pill toolbar, clean
+    input pill.
+  - **History dropdown.** `appearance-none` pill matching the New-chat button +
+    page `⌄` chevron; option labels clipped to ~30 chars (native `<option>` can't
+    be CSS-truncated) with full title in the tooltip.
 
 ## Supabase schema
 
