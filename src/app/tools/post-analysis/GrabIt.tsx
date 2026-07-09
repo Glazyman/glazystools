@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v28";
+const TOOL_VERSION = "v29";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1046,6 +1046,8 @@ function Results({
   const [extraIdeas, setExtraIdeas] = useState<BuildIdea[]>([]);
   const [moreLoading, setMoreLoading] = useState(false);
   const [moreError, setMoreError] = useState<string | null>(null);
+  const [moreNote, setMoreNote] = useState<string | null>(null);
+  const [useClaude, setUseClaude] = useState(false);
   const moreRound = useRef(0);
   const allBuildIdeas = [...buildIdeas, ...extraIdeas];
 
@@ -1053,6 +1055,7 @@ function Results({
     if (moreLoading) return;
     setMoreLoading(true);
     setMoreError(null);
+    setMoreNote(null);
     try {
       const res = await fetch("/api/grab-it/more-ideas", {
         method: "POST",
@@ -1068,10 +1071,16 @@ function Results({
           },
           existing: allBuildIdeas.map((b) => b.title),
           round: moreRound.current,
+          useClaude,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to generate.");
+      if (data.fellBack) {
+        setMoreNote(
+          "Claude isn't active yet — add AI Gateway credits to use it. Generated with the free model instead.",
+        );
+      }
       const mapped: BuildIdea[] = (data.ideas ?? []).map(
         (b: Omit<BuildIdea, "sourceCommentIds">) => ({
           title: b.title,
@@ -1349,27 +1358,44 @@ function Results({
             ))}
           </div>
 
-          {moreError && (
-            <p className="mt-3 text-xs text-wip">{moreError}</p>
-          )}
+          {moreError && <p className="mt-3 text-xs text-wip">{moreError}</p>}
+          {moreNote && <p className="mt-3 text-xs text-wip">{moreNote}</p>}
 
-          <div className="mt-4 flex flex-col items-center gap-1.5">
-            <button
-              onClick={generateMore}
-              disabled={moreLoading}
-              className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-4 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {moreLoading ? (
-                <>
-                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                  Researching more ideas…
-                </>
-              ) : (
-                <>↻ Generate more ideas</>
-              )}
-            </button>
+          <div className="mt-4 flex flex-col items-center gap-2.5">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={generateMore}
+                disabled={moreLoading}
+                className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-4 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {moreLoading ? (
+                  <>
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                    Researching more ideas…
+                  </>
+                ) : (
+                  <>↻ Generate more ideas</>
+                )}
+              </button>
+              <button
+                onClick={() => setUseClaude((v) => !v)}
+                disabled={moreLoading}
+                title="Use Claude (best quality) for this run — needs AI Gateway credits"
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
+                  useClaude
+                    ? "border-accent bg-accent text-bg"
+                    : "border-border bg-elevated text-muted hover:border-accent hover:text-fg"
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${useClaude ? "bg-bg" : "bg-subtle"}`}
+                />
+                Use Claude
+              </button>
+            </div>
             <span className="font-mono text-[10px] uppercase tracking-wider text-subtle">
               Web-researched · goes broader each time
+              {useClaude ? " · Claude (paid)" : " · free model"}
             </span>
           </div>
         </Collapsible>
