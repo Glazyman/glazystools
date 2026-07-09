@@ -1510,7 +1510,6 @@ function ChatPanel({
       // them out steadily (fast, proportional catch-up) so it reads like ChatGPT.
       let target = ""; // full text received so far
       let shown = 0; // chars painted
-      let streamDone = false;
       const setLast = (content: string) =>
         setMessages((m) => {
           const cp = [...m];
@@ -1523,20 +1522,23 @@ function ChatPanel({
           shown = Math.min(target.length, shown + step);
           setLast(target.slice(0, shown));
         }
+        // Keep painting only while there's a backlog; otherwise pause (restarts
+        // when more text arrives) so we never spin the CPU idle.
         rafRef.current =
-          !streamDone || shown < target.length
-            ? requestAnimationFrame(tick)
-            : null;
+          shown < target.length ? requestAnimationFrame(tick) : null;
       };
-      rafRef.current = requestAnimationFrame(tick);
+      const ensureTicking = () => {
+        if (rafRef.current == null) rafRef.current = requestAnimationFrame(tick);
+      };
 
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         target += dec.decode(value, { stream: true });
+        ensureTicking();
       }
       target += dec.decode();
-      streamDone = true;
+      ensureTicking(); // paint any remaining tail
       // Auto-save the thread once the answer is complete.
       await persist([...next, { role: "assistant", content: target }]);
     } catch (e) {
