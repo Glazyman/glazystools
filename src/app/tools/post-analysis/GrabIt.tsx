@@ -47,7 +47,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v17";
+const TOOL_VERSION = "v18";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1591,11 +1591,16 @@ function ChatPanel({
               className="max-w-[200px] truncate rounded-full border border-border bg-panel px-3 py-1 text-xs text-fg focus:border-accent focus:outline-none"
             >
               <option value="">Current chat</option>
-              {threads.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title || "Untitled chat"}
-                </option>
-              ))}
+              {threads.map((t) => {
+                const label = t.title?.trim() || "Untitled chat";
+                const short =
+                  label.length > 30 ? `${label.slice(0, 29).trimEnd()}…` : label;
+                return (
+                  <option key={t.id} value={t.id} title={label}>
+                    {short}
+                  </option>
+                );
+              })}
             </select>
           )}
         </div>
