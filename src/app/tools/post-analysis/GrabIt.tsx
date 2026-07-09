@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v36";
+const TOOL_VERSION = "v38";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -989,6 +989,14 @@ function Results({
   const [focused, setFocused] = useState<DisplayComment | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatUseClaude, setChatUseClaude] = useState(false);
+  const setChatOpenPersist = (o: boolean) => {
+    setChatOpen(o);
+    try {
+      localStorage.setItem("pa:card:ask-chat", o ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
 
   // Remember whether Ask Chat was left open across reloads.
   useEffect(() => {
@@ -1059,6 +1067,18 @@ function Results({
   const [moreNote, setMoreNote] = useState<string | null>(null);
   const [useClaude, setUseClaude] = useState(false);
   const [ideaCount, setIdeaCount] = useState(3);
+  const [generatingFor, setGeneratingFor] = useState<string | null>(null);
+  // Multi-select comments → combine into one idea generation.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selCount, setSelCount] = useState(3);
+  const [selClaude, setSelClaude] = useState(false);
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   const moreRound = useRef(0);
   const allBuildIdeas = [...buildIdeas, ...extraIdeas];
   const ideasKey = `pa:extra-ideas:${post.url}`;
@@ -1080,65 +1100,117 @@ function Results({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.url]);
 
+  // Shared idea generation. `seed` focuses ideas on one comment; `sourceIds`
+  // tags the resulting ideas so the card shows they came from that comment.
+  async function runIdeaGen(opts: {
+    useClaude: boolean;
+    count: number;
+    seeds?: { author: string; text: string }[];
+    sourceIds?: string[];
+  }) {
+    const res = await fetch("/api/grab-it/more-ideas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context: {
+          author: post.author,
+          summary: analysis?.videoSummary,
+          transcript: analysis?.transcript,
+          comments: (analysis?.scoredComments ?? [])
+            .slice(0, 40)
+            .map((c) => `@${c.author}: ${c.text}`),
+        },
+        existing: allBuildIdeas.map((b) => b.title),
+        round: moreRound.current,
+        useClaude: opts.useClaude,
+        count: opts.count,
+        seeds: opts.seeds,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Failed to generate.");
+    const label = data.usedClaude ? "Claude" : "Gemini Flash";
+    const mapped: BuildIdea[] = (data.ideas ?? []).map(
+      (b: Omit<BuildIdea, "sourceCommentIds">) => ({
+        title: b.title,
+        whatItIs: b.whatItIs,
+        howToBuild: b.howToBuild ?? [],
+        insight: b.insight,
+        sourceCommentIds: opts.sourceIds ?? [],
+        model: label,
+      }),
+    );
+    moreRound.current += 1;
+    setExtraIdeas((prev) => {
+      const next = [...prev, ...mapped];
+      try {
+        localStorage.setItem(
+          ideasKey,
+          JSON.stringify({ ideas: next, round: moreRound.current }),
+        );
+      } catch {
+        /* snapshot too big — skip */
+      }
+      return next;
+    });
+    return { count: mapped.length, fellBack: !!data.fellBack };
+  }
+
   async function generateMore() {
-    if (moreLoading) return;
+    if (moreLoading || generatingFor) return;
     setMoreLoading(true);
     setMoreError(null);
     setMoreNote(null);
     try {
-      const res = await fetch("/api/grab-it/more-ideas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          context: {
-            author: post.author,
-            summary: analysis?.videoSummary,
-            transcript: analysis?.transcript,
-            comments: (analysis?.scoredComments ?? [])
-              .slice(0, 40)
-              .map((c) => `@${c.author}: ${c.text}`),
-          },
-          existing: allBuildIdeas.map((b) => b.title),
-          round: moreRound.current,
-          useClaude,
-          count: ideaCount,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to generate.");
-      if (data.fellBack) {
+      const r = await runIdeaGen({ useClaude, count: ideaCount });
+      if (r.fellBack) {
         setMoreNote(
           "Claude isn't active yet — add AI Gateway credits to use it. Generated with the free model instead.",
         );
       }
-      const label = data.usedClaude ? "Claude" : "Gemini Flash";
-      const mapped: BuildIdea[] = (data.ideas ?? []).map(
-        (b: Omit<BuildIdea, "sourceCommentIds">) => ({
-          title: b.title,
-          whatItIs: b.whatItIs,
-          howToBuild: b.howToBuild ?? [],
-          insight: b.insight,
-          sourceCommentIds: [],
-          model: label,
-        }),
-      );
-      moreRound.current += 1;
-      setExtraIdeas((prev) => {
-        const next = [...prev, ...mapped];
-        try {
-          localStorage.setItem(
-            ideasKey,
-            JSON.stringify({ ideas: next, round: moreRound.current }),
-          );
-        } catch {
-          /* snapshot too big — skip */
-        }
-        return next;
-      });
     } catch (e) {
       setMoreError(e instanceof Error ? e.message : "Failed to generate.");
     } finally {
       setMoreLoading(false);
+    }
+  }
+
+  // Generate ideas from the SELECTED comments (combined); they land in the
+  // Build ideas card tagged as sparked by those comments (+ the model badge).
+  async function generateFromComments(
+    comments: DisplayComment[],
+    opts: { useClaude: boolean; count: number },
+  ) {
+    if (moreLoading || generatingFor || comments.length === 0) return;
+    setGeneratingFor("selection");
+    setMoreError(null);
+    setMoreNote(null);
+    try {
+      const r = await runIdeaGen({
+        useClaude: opts.useClaude,
+        count: opts.count,
+        seeds: comments.map((c) => ({ author: c.author, text: c.text })),
+        sourceIds: comments.map((c) => c.id),
+      });
+      setSelected(new Set());
+      setMoreNote(
+        `Added ${r.count} idea${r.count === 1 ? "" : "s"} from ${comments.length} comment${
+          comments.length === 1 ? "" : "s"
+        } to Build ideas ↑${
+          r.fellBack ? " — Claude unavailable, used the free model" : ""
+        }`,
+      );
+      setTimeout(
+        () =>
+          document
+            .getElementById("pa-build-ideas")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        60,
+      );
+    } catch (e) {
+      setMoreError(e instanceof Error ? e.message : "Failed to generate.");
+    } finally {
+      setGeneratingFor(null);
     }
   }
 
@@ -1362,7 +1434,13 @@ function Results({
 
         <div className="space-y-2">
           {shown.map((c) => (
-            <CommentCard key={c.id} c={c} onAsk={askAbout} />
+            <CommentCard
+                key={c.id}
+                c={c}
+                onAsk={askAbout}
+                selected={selected.has(c.id)}
+                onToggleSelect={() => toggleSelect(c.id)}
+              />
           ))}
           {sorted.length === 0 && (
             <p className="text-sm text-subtle">No comments match this filter.</p>
@@ -1383,6 +1461,7 @@ function Results({
       {/* 3) Build ideas — the hero: what to create from this + its comments */}
       {hasAI && allBuildIdeas.length > 0 && (
         <Collapsible
+          id="pa-build-ideas"
           title="🚀 Build ideas — what to create & how"
           count={allBuildIdeas.length}
           accent
@@ -1495,38 +1574,127 @@ function Results({
       )}
 
       {hasAI && (
-        <details
-          id="grab-chat"
-          open={chatOpen}
-          onToggle={(e) => {
-            const o = e.currentTarget.open;
-            setChatOpen(o);
-            try {
-              localStorage.setItem("pa:card:ask-chat", o ? "1" : "0");
-            } catch {
-              /* ignore */
-            }
-          }}
-          className="group overflow-hidden rounded-xl border border-border bg-panel transition-colors open:border-border-strong"
-        >
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold tracking-tight text-fg">
+        <>
+          {/* Toggle — opens the chat (full-screen modal on mobile, inline card
+              on desktop). */}
+          <button
+            onClick={() => setChatOpenPersist(!chatOpen)}
+            className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-panel px-5 py-4 text-sm font-semibold tracking-tight text-fg transition-colors hover:border-border-strong"
+          >
             <span>Ask Chat</span>
-            <span className="text-subtle transition-transform group-open:rotate-180">
+            <span
+              className={`text-subtle transition-transform ${chatOpen ? "sm:rotate-180" : ""}`}
+            >
               ⌄
             </span>
-          </summary>
-          <div className="border-t border-border px-5 pb-5 pt-4">
-            <ChatPanel
-              post={post}
-              analysis={analysis!}
-              focused={focused}
-              onClearFocus={() => setFocused(null)}
-              quickQuestions={analysis!.audienceQuestions}
-              useClaude={chatUseClaude}
-              onUseClaudeChange={setChatUseClaude}
-            />
+          </button>
+
+          {chatOpen && (
+            <div
+              id="grab-chat"
+              className="fixed inset-0 z-50 flex min-h-0 flex-col bg-bg p-3 sm:static sm:z-auto sm:mt-3 sm:rounded-xl sm:border sm:border-border sm:bg-panel sm:p-5"
+            >
+              {/* Mobile-only header with a close button */}
+              <div className="mb-2 flex items-center justify-between sm:hidden">
+                <span className="font-display text-base font-semibold text-fg">
+                  Ask Chat
+                </span>
+                <button
+                  onClick={() => setChatOpenPersist(false)}
+                  aria-label="Close chat"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-muted hover:bg-hover hover:text-fg"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                    <line x1="6" y1="18" x2="18" y2="6" />
+                  </svg>
+                </button>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col sm:block">
+                <ChatPanel
+                  post={post}
+                  analysis={analysis!}
+                  focused={focused}
+                  onClearFocus={() => setFocused(null)}
+                  quickQuestions={analysis!.audienceQuestions}
+                  useClaude={chatUseClaude}
+                  onUseClaudeChange={setChatUseClaude}
+                />
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Floating action bar when comments are selected — combine them into
+          one idea generation. */}
+      {selected.size > 0 && (
+        <div className="fixed inset-x-3 bottom-3 z-40 mx-auto max-w-xl rounded-2xl border border-accent/40 bg-panel/95 p-3 shadow-card backdrop-blur">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-fg">
+              {selected.size} comment{selected.size === 1 ? "" : "s"} selected
+            </span>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-xs text-muted transition-colors hover:text-fg"
+            >
+              Clear
+            </button>
           </div>
-        </details>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-full border border-border bg-elevated p-0.5">
+              {[1, 2, 3, 4].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setSelCount(n)}
+                  className={`h-7 w-7 rounded-full text-xs font-medium transition-colors ${
+                    selCount === n
+                      ? "bg-accent text-bg"
+                      : "text-muted hover:text-fg"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setSelClaude((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                selClaude
+                  ? "border-accent bg-accent text-bg"
+                  : "border-border bg-elevated text-muted hover:text-fg"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${selClaude ? "bg-bg" : "bg-subtle"}`}
+              />
+              Claude
+            </button>
+            <button
+              onClick={() =>
+                generateFromComments(
+                  [...selected]
+                    .map((id) => commentById.get(id))
+                    .filter((c): c is ScrapedComment => !!c),
+                  { useClaude: selClaude, count: selCount },
+                )
+              }
+              disabled={!!generatingFor}
+              className="ml-auto inline-flex items-center gap-2 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-bg transition-colors hover:bg-accent-strong disabled:opacity-60"
+            >
+              {generatingFor === "selection" ? (
+                <>
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-bg border-t-transparent" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  💡 Generate {selCount} idea{selCount === 1 ? "" : "s"}
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1535,14 +1703,38 @@ function Results({
 function CommentCard({
   c,
   onAsk,
+  selected,
+  onToggleSelect,
 }: {
   c: DisplayComment;
   onAsk: (c: DisplayComment) => void;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const [showReply, setShowReply] = useState(false);
   return (
-    <div className="rounded-lg border border-border bg-elevated p-3.5">
+    <div
+      className={`rounded-lg border bg-elevated p-3.5 transition-colors ${
+        selected ? "border-accent bg-accent/5" : "border-border"
+      }`}
+    >
       <div className="flex items-start gap-3">
+        {/* Select checkbox — pick one or many, then combine into ideas. */}
+        {onToggleSelect && (
+          <button
+            onClick={onToggleSelect}
+            aria-label={selected ? "Deselect comment" : "Select comment"}
+            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
+              selected
+                ? "border-accent bg-accent text-bg"
+                : "border-border-strong text-transparent hover:border-accent"
+            }`}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </button>
+        )}
         {c.score != null ? (
           <ScoreBadge score={c.score} />
         ) : c.relevant ? (
@@ -1575,19 +1767,27 @@ function CommentCard({
           {c.reason && (
             <p className="mt-1 text-xs italic text-subtle">{c.reason}</p>
           )}
-          <div className="mt-2 flex items-center gap-3">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
             <button
               onClick={() => onAsk(c)}
               className="text-xs text-muted hover:text-accent hover:underline"
             >
-              💬 ask about this
+              💬 Ask about this
             </button>
             {c.replyIdea && (
               <button
                 onClick={() => setShowReply((s) => !s)}
                 className="text-xs text-muted hover:text-accent hover:underline"
               >
-                {showReply ? "hide reply idea" : "✍️ reply idea"}
+                {showReply ? "Hide reply idea" : "✍️ Reply idea"}
+              </button>
+            )}
+            {onToggleSelect && (
+              <button
+                onClick={onToggleSelect}
+                className="text-xs font-medium text-accent hover:underline"
+              >
+                {selected ? "✓ Selected" : "💡 Select for ideas"}
               </button>
             )}
           </div>
@@ -1877,7 +2077,7 @@ function ChatPanel({
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Compact toolbar: new chat + thread switcher */}
       <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -1933,10 +2133,11 @@ function ChatPanel({
         </div>
       </div>
 
-      {/* Conversation card — clean, ChatGPT-style */}
+      {/* Conversation card — clean, ChatGPT-style. Fills the screen inside the
+          mobile modal; fixed-height card on desktop. */}
       <div
         ref={listRef}
-        className="max-h-[62vh] min-h-[280px] space-y-6 overflow-y-auto rounded-2xl border border-border bg-bg p-3.5 sm:max-h-[52vh] sm:min-h-[240px] sm:p-4"
+        className="min-h-0 flex-1 space-y-6 overflow-y-auto rounded-2xl border border-border bg-bg p-3.5 sm:max-h-[52vh] sm:min-h-[240px] sm:flex-none sm:p-4"
       >
         {messages.length === 0 ? (
           <div className="flex min-h-[200px] flex-col items-center justify-center gap-4 text-center">
@@ -2159,6 +2360,7 @@ function Collapsible({
   accent,
   defaultOpen,
   storageId,
+  id,
   children,
 }: {
   title: string;
@@ -2166,6 +2368,7 @@ function Collapsible({
   accent?: boolean;
   defaultOpen?: boolean;
   storageId?: string; // when set, remembers open/closed across reloads
+  id?: string;
   children: React.ReactNode;
 }) {
   // Drop a leading emoji so section titles read clean and editorial.
@@ -2185,6 +2388,7 @@ function Collapsible({
   }, [storageId]);
   return (
     <details
+      id={id}
       open={open}
       onToggle={(e) => {
         const o = e.currentTarget.open;

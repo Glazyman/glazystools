@@ -52,13 +52,14 @@ const schema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const { context, existing, round, useClaude, count } =
+    const { context, existing, round, useClaude, count, seeds } =
       (await req.json()) as {
         context: Ctx;
         existing: string[];
         round: number;
         useClaude?: boolean;
         count?: number;
+        seeds?: { author: string; text: string }[];
       };
     const n = Math.max(1, Math.min(4, Math.round(Number(count) || 3)));
 
@@ -72,6 +73,13 @@ export async function POST(req: Request) {
     const researchPrompt = [
       "You are an entrepreneurial research analyst. Use web search to ground your thinking in CURRENT, real market context (existing tools, competitors, demand signals, how others have done it).",
       `Brainstorm exactly ${n} genuinely DISTINCT build/business ideas a creator could act on.`,
+      seeds && seeds.length > 0
+        ? `\nFOCUS: Base EVERY idea on the COMBINATION of these selected comment${
+            seeds.length === 1 ? "" : "s"
+          } — their angles, needs, and insights (weave them together where it makes sense) — using the video below only as background:\n${seeds
+            .map((s) => `@${s.author}: "${s.text}"`)
+            .join("\n")}\n`
+        : "",
       "",
       `VIDEO by @${context.author ?? "unknown"}`,
       `SUMMARY: ${context.summary ?? "(none)"}`,
