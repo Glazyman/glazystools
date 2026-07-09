@@ -1506,41 +1506,21 @@ function ChatPanel({
       const dec = new TextDecoder();
       setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
-      // Smooth typewriter reveal: network delivers bursty chunks, but we paint
-      // them out steadily (fast, proportional catch-up) so it reads like ChatGPT.
-      let target = ""; // full text received so far
-      let shown = 0; // chars painted
-      const setLast = (content: string) =>
-        setMessages((m) => {
-          const cp = [...m];
-          cp[cp.length - 1] = { role: "assistant", content };
-          return cp;
-        });
-      const tick = () => {
-        if (shown < target.length) {
-          const step = Math.max(2, Math.ceil((target.length - shown) / 5));
-          shown = Math.min(target.length, shown + step);
-          setLast(target.slice(0, shown));
-        }
-        // Keep painting only while there's a backlog; otherwise pause (restarts
-        // when more text arrives) so we never spin the CPU idle.
-        rafRef.current =
-          shown < target.length ? requestAnimationFrame(tick) : null;
-      };
-      const ensureTicking = () => {
-        if (rafRef.current == null) rafRef.current = requestAnimationFrame(tick);
-      };
-
+      // Paint each chunk to the screen the instant it arrives.
+      let full = "";
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        target += dec.decode(value, { stream: true });
-        ensureTicking();
+        full += dec.decode(value, { stream: true });
+        setMessages((m) => {
+          const cp = [...m];
+          cp[cp.length - 1] = { role: "assistant", content: full };
+          return cp;
+        });
       }
-      target += dec.decode();
-      ensureTicking(); // paint any remaining tail
+      full += dec.decode();
       // Auto-save the thread once the answer is complete.
-      await persist([...next, { role: "assistant", content: target }]);
+      await persist([...next, { role: "assistant", content: full }]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chat failed.");
     } finally {
