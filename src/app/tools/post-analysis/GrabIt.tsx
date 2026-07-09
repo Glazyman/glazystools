@@ -47,7 +47,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v15";
+const TOOL_VERSION = "v16";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1368,6 +1368,7 @@ function ChatPanel({
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef<number | null>(null);
 
   const refreshThreads = useCallback(async () => {
     try {
@@ -1411,6 +1412,14 @@ function ChatPanel({
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
 
+  // Stop the reveal loop on unmount.
+  useEffect(
+    () => () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    },
+    [],
+  );
+
   // Persist the thread after each completed exchange.
   async function persist(msgs: ChatMsg[]) {
     try {
@@ -1428,7 +1437,15 @@ function ChatPanel({
     }
   }
 
+  function stopReveal() {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }
+
   function newChat() {
+    stopReveal();
     setMessages([]);
     setInput("");
     setError(null);
@@ -1438,6 +1455,7 @@ function ChatPanel({
 
   async function openThread(id: string) {
     if (id === threadIdRef.current) return;
+    stopReveal();
     try {
       const full = await getChat(id);
       setMessages(full.messages ?? []);
@@ -1467,6 +1485,7 @@ function ChatPanel({
   async function send(text?: string) {
     const q = (text ?? input).trim();
     if (!q || streaming) return;
+    stopReveal();
     const next: ChatMsg[] = [...messages, { role: "user", content: q }];
     setMessages(next);
     setInput("");
@@ -1485,20 +1504,41 @@ function ChatPanel({
       }
       const reader = res.body.getReader();
       const dec = new TextDecoder();
-      let acc = "";
       setMessages((m) => [...m, { role: "assistant", content: "" }]);
+
+      // Smooth typewriter reveal: network delivers bursty chunks, but we paint
+      // them out steadily (fast, proportional catch-up) so it reads like ChatGPT.
+      let target = ""; // full text received so far
+      let shown = 0; // chars painted
+      let streamDone = false;
+      const setLast = (content: string) =>
+        setMessages((m) => {
+          const cp = [...m];
+          cp[cp.length - 1] = { role: "assistant", content };
+          return cp;
+        });
+      const tick = () => {
+        if (shown < target.length) {
+          const step = Math.max(2, Math.ceil((target.length - shown) / 5));
+          shown = Math.min(target.length, shown + step);
+          setLast(target.slice(0, shown));
+        }
+        rafRef.current =
+          !streamDone || shown < target.length
+            ? requestAnimationFrame(tick)
+            : null;
+      };
+      rafRef.current = requestAnimationFrame(tick);
+
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        acc += dec.decode(value, { stream: true });
-        setMessages((m) => {
-          const cp = [...m];
-          cp[cp.length - 1] = { role: "assistant", content: acc };
-          return cp;
-        });
+        target += dec.decode(value, { stream: true });
       }
+      target += dec.decode();
+      streamDone = true;
       // Auto-save the thread once the answer is complete.
-      await persist([...next, { role: "assistant", content: acc }]);
+      await persist([...next, { role: "assistant", content: target }]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chat failed.");
     } finally {
