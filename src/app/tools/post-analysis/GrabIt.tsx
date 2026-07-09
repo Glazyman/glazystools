@@ -43,12 +43,12 @@ const stageSteps = [
 
 const PAGE = 5;
 
-type View = "run" | "saved";
+type View = "new" | "current" | "saved";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v20";
+const TOOL_VERSION = "v21";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -141,7 +141,7 @@ type TranscriptResult = {
 };
 
 export function GrabIt() {
-  const [view, setView] = useState<View>("run");
+  const [view, setView] = useState<View>("new");
   const [mode, setMode] = useState<RunMode>("full");
   const [url, setUrl] = useState("");
   const [stage, setStage] = useState<Stage>("idle");
@@ -176,7 +176,7 @@ export function GrabIt() {
     setAnalysis(null);
     setTranscriptOnly(null);
     setSaveState("idle");
-    setView("run");
+    setView("new");
     setStage("scraping");
     try {
       const scrapeRes = await postJson("/api/grab-it/scrape", { url }, 240_000);
@@ -187,6 +187,7 @@ export function GrabIt() {
       // Download mode: we already have the video URL, nothing more to do.
       if (mode === "download") {
         setStage("done");
+        setView("current");
         return;
       }
 
@@ -200,6 +201,7 @@ export function GrabIt() {
         if (!res.ok) throw new Error(data.error ?? "Transcription failed.");
         setTranscriptOnly(data);
         setStage("done");
+        setView("current");
         return;
       }
 
@@ -212,6 +214,7 @@ export function GrabIt() {
         setError(friendlyError(e));
       }
       setStage("done");
+      setView("current");
     } catch (err) {
       setError(friendlyError(err));
       setStage("error");
@@ -249,23 +252,88 @@ export function GrabIt() {
 
   async function openSaved(id: string) {
     const full = await getRun(id);
+    setMode("full");
     setPost(full.post);
     setAnalysis(full.analysis);
+    setTranscriptOnly(null);
     setStage("done");
     setSaveState("saved");
     setError(null);
-    setView("run");
+    setView("current");
+  }
+
+  // Switch to a fresh input to start a new search (keeps the current run
+  // available under the "Current run" tab).
+  function startNew() {
+    setView("new");
+    setUrl("");
+    setError(null);
   }
 
   const busy = stage === "scraping" || stage === "analyzing";
+  const hasCurrent = !!post; // a run has been fetched/opened
+
+  // Restore the last run + active tab on mount so a reload keeps you in place.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    try {
+      const raw = localStorage.getItem("post-analysis:last");
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.post) {
+        setMode(s.mode ?? "full");
+        setPost(s.post);
+        setAnalysis(s.analysis ?? null);
+        setTranscriptOnly(s.transcriptOnly ?? null);
+        setStage("done");
+        setSaveState("saved");
+      }
+      if (s.view === "saved") setView("saved");
+      else if (s.view === "current" && s.post) setView("current");
+      else setView("new");
+    } catch {
+      /* ignore corrupt/oversized snapshot */
+    }
+  }, []);
+
+  // Persist the current run + active tab whenever they change.
+  useEffect(() => {
+    if (!restored.current) return;
+    try {
+      const done = stage === "done";
+      localStorage.setItem(
+        "post-analysis:last",
+        JSON.stringify({
+          view,
+          mode,
+          post: done ? post : null,
+          analysis: done ? analysis : null,
+          transcriptOnly: done ? transcriptOnly : null,
+        }),
+      );
+    } catch {
+      /* snapshot too big for localStorage — skip */
+    }
+  }, [view, mode, stage, post, analysis, transcriptOnly]);
 
   return (
     <div className="space-y-6">
-      {/* Tabs */}
+      {/* Tabs: New · Current run (name) · Saved */}
       <div className="flex items-center gap-1 border-b border-border">
-        <TabButton active={view === "run"} onClick={() => setView("run")}>
-          Run
+        <TabButton active={view === "new"} onClick={startNew}>
+          New
         </TabButton>
+        {hasCurrent && (
+          <TabButton
+            active={view === "current"}
+            onClick={() => setView("current")}
+          >
+            Current run
+            {post?.author ? ` · @${post.author}` : ""}
+          </TabButton>
+        )}
         <TabButton
           active={view === "saved"}
           onClick={() => {
@@ -280,7 +348,37 @@ export function GrabIt() {
         </span>
       </div>
 
-      {view === "run" ? (
+      {view === "saved" ? (
+        <SavedView
+          items={saved}
+          loading={savedLoading}
+          onOpen={openSaved}
+          onDeleted={refreshSaved}
+        />
+      ) : view === "current" && post ? (
+        /* ── Current run output — no input, just the analysis ── */
+        <>
+          {mode === "full" && <SaveIndicator state={saveState} />}
+          {error && <ErrorBanner message={error} onRetry={retryAnalysis} />}
+
+          {mode === "full" && (
+            <ResultsBoundary>
+              <Results post={post} analysis={analysis} />
+            </ResultsBoundary>
+          )}
+          {mode === "transcript" && transcriptOnly && (
+            <ResultsBoundary>
+              <TranscriptView post={post} result={transcriptOnly} />
+            </ResultsBoundary>
+          )}
+          {mode === "download" && (
+            <ResultsBoundary>
+              <DownloadView post={post} />
+            </ResultsBoundary>
+          )}
+        </>
+      ) : (
+        /* ── New: the input to start a search ── */
         <>
           {/* Mode selector */}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -327,7 +425,7 @@ export function GrabIt() {
             YouTube. Instagram is fully tested; the others are newly added.
           </p>
 
-          {mode === "full" && stage !== "idle" && <StageBar stage={stage} />}
+          {mode === "full" && busy && <StageBar stage={stage} />}
           {mode !== "full" && busy && (
             <div className="flex items-center gap-2 rounded-lg border border-border bg-panel p-4 text-sm text-muted">
               <Spinner />
@@ -335,37 +433,12 @@ export function GrabIt() {
             </div>
           )}
 
-          {stage === "done" && mode === "full" && (
-            <SaveIndicator state={saveState} />
-          )}
-
-          {error && <ErrorBanner message={error} onRetry={retryAnalysis} />}
-
-          {stage === "done" && mode === "full" && post && (
-            <ResultsBoundary>
-              <Results post={post} analysis={analysis} />
-            </ResultsBoundary>
-          )}
-          {stage === "done" && mode === "transcript" && post && transcriptOnly && (
-            <ResultsBoundary>
-              <TranscriptView post={post} result={transcriptOnly} />
-            </ResultsBoundary>
-          )}
-          {stage === "done" && mode === "download" && post && (
-            <ResultsBoundary>
-              <DownloadView post={post} />
-            </ResultsBoundary>
+          {error && !busy && (
+            <ErrorBanner message={error} onRetry={retryAnalysis} />
           )}
 
           {stage === "idle" && <EmptyHint />}
         </>
-      ) : (
-        <SavedView
-          items={saved}
-          loading={savedLoading}
-          onOpen={openSaved}
-          onDeleted={refreshSaved}
-        />
       )}
     </div>
   );

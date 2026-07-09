@@ -2,7 +2,6 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { ActivityBar } from "./ActivityBar";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 
@@ -14,6 +13,15 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false); // desktop sidebar
   const pathname = usePathname();
 
+  // Restore the collapsed state from a previous session.
+  useEffect(() => {
+    setCollapsed(localStorage.getItem("sidebar:collapsed") === "1");
+  }, []);
+  // Persist it so a reload keeps the sidebar the way you left it.
+  useEffect(() => {
+    localStorage.setItem("sidebar:collapsed", collapsed ? "1" : "0");
+  }, [collapsed]);
+
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setNavOpen(false), [pathname]);
 
@@ -22,13 +30,15 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden">
-      {/* Desktop chrome — hidden on small screens; sidebar can be collapsed */}
+      {/* Desktop: one unified sidebar — expanded panel or slim icon rail. */}
       <div className="hidden md:flex">
-        <ActivityBar />
-        {!collapsed && <Sidebar onCollapse={() => setCollapsed(true)} />}
+        <Sidebar
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((c) => !c)}
+        />
       </div>
 
-      {/* Mobile drawer */}
+      {/* Mobile drawer — always the expanded sidebar; toggle closes it. */}
       {navOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <button
@@ -37,18 +47,13 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             className="absolute inset-0 bg-black/60"
           />
           <div className="absolute left-0 top-0 flex h-full">
-            <ActivityBar />
-            <Sidebar />
+            <Sidebar onToggle={() => setNavOpen(false)} />
           </div>
         </div>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar
-          onMenu={() => setNavOpen(true)}
-          sidebarCollapsed={collapsed}
-          onToggleSidebar={() => setCollapsed((c) => !c)}
-        />
+        <TopBar onMenu={() => setNavOpen(true)} />
         <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
