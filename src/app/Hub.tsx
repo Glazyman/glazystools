@@ -45,7 +45,6 @@ export function Hub() {
 
   const categories = Object.keys(grouped);
   const matchCount = categories.reduce((n, c) => n + grouped[c].length, 0);
-  const liveCount = tools.filter((t) => t.status === "live").length;
 
   return (
     <div className="grain relative min-h-full overflow-hidden">
@@ -83,8 +82,7 @@ export function Hub() {
 
         {/* Hero */}
         <h1 className="mt-6 font-display text-[clamp(3rem,9vw,7rem)] font-normal leading-[0.92] tracking-tight text-fg">
-          Glazy&apos;s{" "}
-          <em className="italic text-accent">Tools</em>
+          Tool <em className="italic text-accent">Box</em>
           <span className="text-subtle">.</span>
         </h1>
         <p className="mt-6 max-w-xl text-lg font-light leading-relaxed text-muted">
@@ -118,16 +116,6 @@ export function Hub() {
             <kbd className="hidden shrink-0 rounded border border-border px-2 py-1 font-mono text-[10px] text-subtle sm:inline">
               ⌘K
             </kbd>
-          </div>
-          {/* Status line */}
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 font-mono text-[11px] uppercase tracking-wider text-subtle">
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-live" />
-              All systems nominal
-            </span>
-            <span>
-              {liveCount} live · {tools.length} total
-            </span>
           </div>
         </div>
 

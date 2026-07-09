@@ -6,8 +6,12 @@ import type { Analysis, ScoredComment, ScrapedPost } from "./types";
 // Gateway (one key for every provider). Defaults are the cheapest sensible
 // choice (Gemini Flash for everything); override via env to trade up on quality.
 //   e.g. GRAB_IT_ANALYSIS_MODEL=anthropic/claude-sonnet-4.5 for stronger ideas.
+// Gemini 2.5 Pro: multimodal (reads the video) + strong reasoning for better
+// ideas — the best FREE option. Override with GRAB_IT_ANALYSIS_MODEL. Note: the
+// analysis must transcribe the video, so this has to stay a multimodal model
+// (Gemini); Claude/GPT can't be used here.
 const ANALYSIS_MODEL =
-  process.env.GRAB_IT_ANALYSIS_MODEL ?? "google/gemini-2.5-flash";
+  process.env.GRAB_IT_ANALYSIS_MODEL ?? "google/gemini-2.5-pro";
 const VIDEO_MODEL =
   process.env.GRAB_IT_VIDEO_MODEL ?? "google/gemini-2.5-flash";
 
