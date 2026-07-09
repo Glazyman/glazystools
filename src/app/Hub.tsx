@@ -56,7 +56,8 @@ export function Hub() {
           height: 520,
           top: -180,
           right: -120,
-          background: "rgba(216,255,62,0.10)",
+          background:
+            "radial-gradient(circle, rgba(216,255,62,0.14) 0%, transparent 70%)",
         }}
       />
       <div
@@ -66,7 +67,8 @@ export function Hub() {
           height: 420,
           top: 120,
           left: -160,
-          background: "rgba(255,106,61,0.08)",
+          background:
+            "radial-gradient(circle, rgba(255,106,61,0.12) 0%, transparent 70%)",
         }}
       />
 
