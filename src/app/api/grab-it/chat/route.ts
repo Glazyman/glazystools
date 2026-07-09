@@ -14,6 +14,7 @@ type ChatContext = {
   summary?: string;
   transcript?: string;
   transcriptSource?: string;
+  ideas?: string[];
   comments?: { author: string; text: string; likes: number; score: number }[];
   focused?: { author: string; text: string } | null;
 };
@@ -22,14 +23,17 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 
 function buildSystem(ctx: ChatContext): string {
   const lines = [
-    "You are a sharp, genuinely helpful assistant for a creator analyzing a video/post and its comments.",
-    "The transcript, summary, and comments below are your PRIMARY context — ground answers in them and reference them when relevant.",
-    "You are NOT restricted to them. When the user wants to go further — explain a concept from the comments, expand on an idea, brainstorm, compare to other things, or figure out HOW TO BUILD or act on something — use your own general knowledge freely and help fully. Never refuse just because something isn't in the transcript; only flag the source distinction when it genuinely matters (e.g. 'the comments don't say, but here's how it generally works').",
-    "You can search the web (Google Search) when a question needs current, factual, or outside information — use it, then answer with what you found.",
-    "Be concise, concrete, and practical. Give real steps, examples, and tools when asked how to do or build something.",
+    "You are a sharp builder/entrepreneur's brainstorming partner. The user is analyzing a video/post and its comments to find BUSINESS IDEAS, inspiration, and things to BUILD.",
+    "The transcript, summary, surfaced build-ideas, and comments below are your PRIMARY context — ground answers in them and reference them (especially comments where someone shares first-hand how they did something).",
+    "Lean into helping the user CREATE and act: flesh out ideas, pressure-test them, map out concrete steps, tools, costs, and first moves. When they point at a comment or idea, help them build on it.",
+    "You are NOT restricted to this post. Use your own general knowledge freely and search the web (Google Search) when a question needs current, factual, or outside info — then answer with what you found. Never refuse just because something isn't in the transcript.",
+    "Be concise, concrete, and practical. Give real steps, examples, numbers, and tools — not vague encouragement.",
     "",
     `VIDEO by @${ctx.author ?? "unknown"}`,
     `SUMMARY: ${ctx.summary ?? "(none)"}`,
+    ctx.ideas?.length
+      ? `BUILD IDEAS ALREADY SURFACED:\n${ctx.ideas.map((i) => `- ${i}`).join("\n")}`
+      : "",
     "",
     ctx.transcript
       ? `TRANSCRIPT (${ctx.transcriptSource ?? "unknown"}):\n${ctx.transcript}`

@@ -33,6 +33,16 @@ export type ScoredComment = ScrapedComment & {
   replyIdea?: string; // a draft reply that builds on it
 };
 
+// An actionable thing to build/start, inspired by the post's topic AND the
+// ideas/experiences people shared in the comments. The heart of the tool.
+export type BuildIdea = {
+  title: string; // short punchy name for the thing to build
+  whatItIs: string; // 1-2 sentences on the business/product/content
+  howToBuild: string[]; // concrete first steps to actually start it
+  insight: string; // the video/comment insight this is based on
+  sourceCommentIds: string[]; // comments that inspired/support it (may be empty)
+};
+
 // Cross-run analysis when combining multiple saved videos.
 export type CombinedAnalysis = {
   overview: string; // the through-line across the videos
@@ -51,6 +61,12 @@ export type Analysis = {
   gaps: string[]; // what's missing / what people want more of
   followUpIdeas: string[]; // strong follow-ups or add-ons to make
   draftComments: string[]; // value-adding comments/replies you could post
+  // Business/build opportunities inspired by the topic + the comments — with a
+  // concrete "how to start" for each. The main event for building/brainstorming.
+  buildIdeas: BuildIdea[];
+  // Comment ids where someone shares FIRST-HAND experience or a concrete how-to
+  // (how they did it, unique tactics, numbers) — the gold nuggets to mine.
+  playbookCommentIds: string[];
   // Full per-comment scoring — only when there aren't too many comments.
   scoredComments: ScoredComment[];
   // Whether every comment was scored, or we switched to a relevance shortlist

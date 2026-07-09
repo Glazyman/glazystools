@@ -93,6 +93,42 @@ const baseFields = {
     .describe(
       "The best ideas, add-ons, and improvements surfaced BY the commenters (or clearly implied by what they're asking) — the gold worth mining. Prioritize concrete ideas people actually raised over generic suggestions.",
     ),
+  buildIdeas: z
+    .array(
+      z.object({
+        title: z
+          .string()
+          .describe("Short, punchy name for the thing to build or start."),
+        whatItIs: z
+          .string()
+          .describe(
+            "1-2 sentences: the business, product, service, or content this is.",
+          ),
+        howToBuild: z
+          .array(z.string())
+          .describe(
+            "2-5 concrete first steps to actually build or start it — real, specific actions, not fluff.",
+          ),
+        insight: z
+          .string()
+          .describe(
+            "The insight from the video and/or a specific comment this idea is based on — name what sparked it.",
+          ),
+        sourceCommentIds: z
+          .array(z.string())
+          .describe(
+            "ids of the comment(s) that inspired or support this idea; empty array if it comes from the video/topic itself.",
+          ),
+      }),
+    )
+    .describe(
+      "Think like a builder/entrepreneur: actionable business & build opportunities inspired by the post's TOPIC and by the ideas/experiences people shared in the comments, each with a concrete way to start. THIS IS THE POINT of the tool — be generous and specific here (aim for 3-6 strong ideas).",
+    ),
+  playbookCommentIds: z
+    .array(z.string())
+    .describe(
+      "ids of comments where someone shares FIRST-HAND experience or a concrete how-to: how they actually did it, unique tactics, real numbers, what worked or failed (e.g. someone explaining how they bought and grew a plumbing business). These are the gold nuggets to mine for building. Best/most-useful first.",
+    ),
   draftComments: z
     .array(z.string())
     .describe(
@@ -215,7 +251,7 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
       : `There are too many comments to score individually. Instead, pick the ones MOST RELEVANT to the ${noun} — comments that genuinely engage with its content (real ideas, add-ons, sharp questions, corrections, insights). Return their ids in relevantCommentIds, best first (up to ~40). Skip spam, emoji, tag-a-friend, and generic praise.`;
 
   const prompt = [
-    `You are helping a creator mine the comments on a ${noun} for great ideas and add-ons.`,
+    `You are a sharp builder/entrepreneur's research partner. Your job: mine this ${noun} AND its comments for BUSINESS IDEAS, opportunities, and inspiration for things to BUILD — then lay out how to actually start them.`,
     ``,
     `AUTHOR: @${post.author}`,
     `CAPTION: ${post.caption || "(none)"}`,
@@ -231,13 +267,14 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
       (c) => `${c.id} | @${c.author} | ${c.likes} | ${c.text.replace(/\n/g, " ")}`,
     ),
     ``,
-    `My main goal: mine the comments for good ideas and add-ons — NOT to write replies. Replies are a nice-to-have afterthought.`,
+    `What I care about most: (a) BUILD IDEAS — concrete businesses/products/content I could create based on the topic and on what people shared, each with real first steps; and (b) the GOLD-NUGGET comments where someone shares how they actually did something — their first-hand experience, unique tactics, numbers, what worked (e.g. on a reel about buying a plumbing business, a commenter explaining exactly how they bought and grew theirs). Surface those, don't let them get buried.`,
     ``,
     `Tasks:`,
     `1. ${hasVideo ? "Transcribe the video, then summarize" : "Summarize"} what this ${noun} is really about.`,
     `2. ${commentTask}`,
-    `3. Pull out the best ideas & add-ons the commenters surfaced (this is the point), plus what people are asking and what's missing.`,
-    `4. Only briefly: a few draft replies I could post. Keep this minimal.`,
+    `3. Generate strong, specific buildIdeas (the main event) with concrete how-to steps, and flag the playbook/first-hand-experience comments in playbookCommentIds.`,
+    `4. Also pull the best ideas & add-ons commenters surfaced, what people are asking, and what's missing.`,
+    `5. Only briefly: a few draft replies I could post. Keep this minimal.`,
   ].join("\n");
 
   const content: Array<{ type: "text"; text: string } | VideoFilePart> =
@@ -289,6 +326,18 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     relevantCommentIds = object.relevantCommentIds.filter((id) => byId.has(id));
   }
 
+  // Keep only comment-id references that map to real comments.
+  const buildIdeas = (object.buildIdeas ?? []).map((b) => ({
+    title: b.title,
+    whatItIs: b.whatItIs,
+    howToBuild: b.howToBuild ?? [],
+    insight: b.insight,
+    sourceCommentIds: (b.sourceCommentIds ?? []).filter((id) => byId.has(id)),
+  }));
+  const playbookCommentIds = (object.playbookCommentIds ?? []).filter((id) =>
+    byId.has(id),
+  );
+
   return {
     transcript,
     transcriptSource,
@@ -297,6 +346,8 @@ export async function analyzePost(post: ScrapedPost): Promise<Analysis> {
     gaps: object.gaps,
     followUpIdeas: object.followUpIdeas,
     draftComments: object.draftComments,
+    buildIdeas,
+    playbookCommentIds,
     scoredComments,
     scoringMode,
     relevantCommentIds,

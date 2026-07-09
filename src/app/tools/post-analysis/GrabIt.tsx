@@ -13,6 +13,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
   Analysis,
+  BuildIdea,
   CombinedAnalysis,
   ScrapedComment,
   ScrapedPost,
@@ -47,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v19";
+const TOOL_VERSION = "v20";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -978,6 +979,16 @@ function Results({
 
   const hasRelevant = allComments.some((c) => c.relevant);
 
+  // Fast id → raw comment lookup, for build-idea sources & the playbook list.
+  const commentById = useMemo(
+    () => new Map(post.comments.map((c) => [c.id, c] as const)),
+    [post.comments],
+  );
+  const buildIdeas = analysis?.buildIdeas ?? [];
+  const playbookComments = (analysis?.playbookCommentIds ?? [])
+    .map((id) => commentById.get(id))
+    .filter((c): c is ScrapedComment => !!c);
+
   const categories = useMemo(
     () => [
       "all",
@@ -1079,6 +1090,61 @@ function Results({
       {/* AI-only sections */}
       {hasAI && (
         <>
+          {/* The hero: what you could build from this post + its comments. */}
+          {buildIdeas.length > 0 && (
+            <Collapsible
+              title="🚀 Build ideas — what to create & how"
+              count={buildIdeas.length}
+              accent
+              defaultOpen
+            >
+              <div className="space-y-3">
+                {buildIdeas.map((idea, i) => (
+                  <BuildIdeaCard
+                    key={i}
+                    idea={idea}
+                    commentById={commentById}
+                    onAsk={askAbout}
+                  />
+                ))}
+              </div>
+            </Collapsible>
+          )}
+
+          {/* Gold nuggets: commenters sharing how they actually did it. */}
+          {playbookComments.length > 0 && (
+            <Collapsible
+              title="🛠 How they did it — playbooks from the comments"
+              count={playbookComments.length}
+              accent
+            >
+              <p className="mb-3 text-xs text-muted">
+                Comments where someone shared first-hand experience, tactics, or
+                exactly how they pulled it off — the real gold to learn from.
+              </p>
+              <div className="space-y-2">
+                {playbookComments.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => askAbout(c)}
+                    className="block w-full rounded-xl border border-border bg-panel px-3.5 py-2.5 text-left transition-colors hover:border-accent"
+                  >
+                    <div className="mb-1 flex items-center gap-2 text-xs text-muted">
+                      <span className="font-medium text-fg">@{c.author}</span>
+                      <span>{c.likes.toLocaleString()} likes</span>
+                      <span className="ml-auto text-accent">
+                        ask about this →
+                      </span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-fg">
+                      {c.text}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </Collapsible>
+          )}
+
           <Collapsible title="📄 Full transcript">
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
               {analysis!.transcript?.trim() ||
@@ -1342,11 +1408,11 @@ function CommentCard({
 type ChatMsg = { role: "user" | "assistant"; content: string };
 
 const SUGGESTIONS = [
-  "Explain the top comment in simple terms",
-  "What are the video's main points?",
-  "What are the best ideas in the comments?",
-  "How would I build one of these ideas?",
-  "What should my next video be?",
+  "What business could I build from this?",
+  "Turn the best comment insight into a plan",
+  "How did the top commenters actually do it?",
+  "Give me a step-by-step to start one idea",
+  "What's the fastest way to test this?",
 ];
 
 function ChatPanel({
@@ -1472,6 +1538,9 @@ function ChatPanel({
       summary: analysis.videoSummary,
       transcript: analysis.transcript,
       transcriptSource: analysis.transcriptSource,
+      ideas: (analysis.buildIdeas ?? []).map(
+        (b) => `${b.title} — ${b.whatItIs}`,
+      ),
       comments: analysis.scoredComments.slice(0, 150).map((c) => ({
         author: c.author,
         text: c.text,
@@ -1793,6 +1862,80 @@ function Collapsible({
       </summary>
       <div className="mt-3">{children}</div>
     </details>
+  );
+}
+
+function BuildIdeaCard({
+  idea,
+  commentById,
+  onAsk,
+}: {
+  idea: BuildIdea;
+  commentById: Map<string, ScrapedComment>;
+  onAsk: (c: DisplayComment) => void;
+}) {
+  const sources = idea.sourceCommentIds
+    .map((id) => commentById.get(id))
+    .filter((c): c is ScrapedComment => !!c);
+  return (
+    <div className="rounded-xl border border-border bg-panel p-4">
+      <h4 className="text-sm font-semibold text-fg">{idea.title}</h4>
+      <p className="mt-1 text-sm text-muted">{idea.whatItIs}</p>
+
+      {idea.howToBuild.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-subtle">
+            How to start
+          </p>
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-fg">
+            {idea.howToBuild.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {idea.insight && (
+        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-xs text-muted">
+          <span className="font-medium text-fg">Why: </span>
+          {idea.insight}
+        </p>
+      )}
+
+      {sources.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-subtle">
+            Sparked by
+          </p>
+          {sources.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => onAsk(c)}
+              className="block w-full rounded-lg border border-border bg-bg px-3 py-1.5 text-left text-xs text-muted transition-colors hover:border-accent"
+            >
+              <span className="font-medium text-fg">@{c.author}</span>:{" "}
+              {c.text.length > 160 ? `${c.text.slice(0, 160)}…` : c.text}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 flex justify-end">
+        <button
+          onClick={() =>
+            onAsk({
+              id: `idea-${idea.title}`,
+              author: "build idea",
+              text: `Help me build this: "${idea.title}" — ${idea.whatItIs}`,
+              likes: 0,
+            })
+          }
+          className="rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
+        >
+          Brainstorm this in chat →
+        </button>
+      </div>
+    </div>
   );
 }
 
