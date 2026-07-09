@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { tools } from "@/lib/tools";
+import { ScrollRestore } from "@/components/workspace/ScrollRestore";
 
 const statusLabel: Record<string, string> = {
   live: "Live",
@@ -70,9 +71,10 @@ export function Hub() {
         }}
       />
 
-      <div className="relative z-10 mx-auto max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+      <ScrollRestore />
+      <div className="relative z-10 mx-auto flex max-w-6xl flex-col items-center px-5 py-14 text-center sm:px-8 sm:py-20">
         {/* Eyebrow */}
-        <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.3em] text-subtle">
+        <div className="flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.3em] text-subtle">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
           Workspace
           <span className="text-subtle">/</span>
@@ -91,7 +93,7 @@ export function Hub() {
         </p>
 
         {/* Search */}
-        <div className="mt-9 max-w-2xl">
+        <div className="mt-9 w-full max-w-2xl">
           <div className="group flex items-center gap-3 rounded-2xl border border-border bg-panel px-4 py-3.5 shadow-card transition-colors focus-within:border-accent">
             <svg
               className="pointer-events-none shrink-0 text-subtle"
@@ -118,7 +120,7 @@ export function Hub() {
             </kbd>
           </div>
           {/* Status line */}
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] uppercase tracking-wider text-subtle">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 font-mono text-[11px] uppercase tracking-wider text-subtle">
             <span className="flex items-center gap-1.5">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-live" />
               All systems nominal
@@ -130,7 +132,7 @@ export function Hub() {
         </div>
 
         {/* Tool grid, grouped by category as numbered chapters */}
-        <div className="mt-16">
+        <div className="mt-16 w-full text-left">
           {matchCount === 0 ? (
             <div className="grid-bg flex flex-col items-center justify-center rounded-2xl border border-dashed border-border-strong px-6 py-20 text-center">
               <p className="text-sm text-muted">

@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v25";
+const TOOL_VERSION = "v27";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -321,7 +321,7 @@ export function GrabIt() {
   return (
     <div className="space-y-6">
       {/* Tabs: New · Current run (name) · Saved */}
-      <div className="flex items-center gap-1 border-b border-border">
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-border">
         <TabButton active={view === "new"} onClick={startNew}>
           New
         </TabButton>
@@ -455,7 +455,7 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+      className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors ${
         active
           ? "border-accent text-fg"
           : "border-transparent text-muted hover:text-fg"
@@ -1042,6 +1042,54 @@ function Results({
     .map((id) => commentById.get(id))
     .filter((c): c is ScrapedComment => !!c);
 
+  // "Generate more ideas" — research-backed, going broader each round.
+  const [extraIdeas, setExtraIdeas] = useState<BuildIdea[]>([]);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const moreRound = useRef(0);
+  const allBuildIdeas = [...buildIdeas, ...extraIdeas];
+
+  async function generateMore() {
+    if (moreLoading) return;
+    setMoreLoading(true);
+    setMoreError(null);
+    try {
+      const res = await fetch("/api/grab-it/more-ideas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: {
+            author: post.author,
+            summary: analysis?.videoSummary,
+            transcript: analysis?.transcript,
+            comments: (analysis?.scoredComments ?? [])
+              .slice(0, 40)
+              .map((c) => `@${c.author}: ${c.text}`),
+          },
+          existing: allBuildIdeas.map((b) => b.title),
+          round: moreRound.current,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to generate.");
+      const mapped: BuildIdea[] = (data.ideas ?? []).map(
+        (b: Omit<BuildIdea, "sourceCommentIds">) => ({
+          title: b.title,
+          whatItIs: b.whatItIs,
+          howToBuild: b.howToBuild ?? [],
+          insight: b.insight,
+          sourceCommentIds: [],
+        }),
+      );
+      setExtraIdeas((prev) => [...prev, ...mapped]);
+      moreRound.current += 1;
+    } catch (e) {
+      setMoreError(e instanceof Error ? e.message : "Failed to generate.");
+    } finally {
+      setMoreLoading(false);
+    }
+  }
+
   const categories = useMemo(
     () => [
       "all",
@@ -1092,7 +1140,7 @@ function Results({
       <div className="flex flex-col items-center text-center">
         {saveState === "saved" && (
           <div className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-live/30 bg-live/10 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-live">
-            ✓ Saved — find it under Saved
+            ✓ Saved
           </div>
         )}
 
@@ -1283,16 +1331,15 @@ function Results({
       </Collapsible>
 
       {/* 3) Build ideas — the hero: what to create from this + its comments */}
-      {hasAI && buildIdeas.length > 0 && (
+      {hasAI && allBuildIdeas.length > 0 && (
         <Collapsible
           title="🚀 Build ideas — what to create & how"
-          count={buildIdeas.length}
+          count={allBuildIdeas.length}
           accent
-          defaultOpen
           storageId="build-ideas"
         >
           <div className="space-y-3">
-            {buildIdeas.map((idea, i) => (
+            {allBuildIdeas.map((idea, i) => (
               <BuildIdeaCard
                 key={i}
                 idea={idea}
@@ -1300,6 +1347,30 @@ function Results({
                 onAsk={askAbout}
               />
             ))}
+          </div>
+
+          {moreError && (
+            <p className="mt-3 text-xs text-wip">{moreError}</p>
+          )}
+
+          <div className="mt-4 flex flex-col items-center gap-1.5">
+            <button
+              onClick={generateMore}
+              disabled={moreLoading}
+              className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-4 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {moreLoading ? (
+                <>
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                  Researching more ideas…
+                </>
+              ) : (
+                <>↻ Generate more ideas</>
+              )}
+            </button>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-subtle">
+              Web-researched · goes broader each time
+            </span>
           </div>
         </Collapsible>
       )}

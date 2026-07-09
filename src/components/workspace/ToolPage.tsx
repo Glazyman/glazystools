@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { getTool } from "@/lib/tools";
+import { ScrollRestore } from "./ScrollRestore";
 
 // Wraps an individual tool's UI with a consistent header (icon, name,
 // description, status). Every tool page renders <ToolPage slug="...">.
@@ -41,6 +42,7 @@ export function ToolPage({
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <ScrollRestore />
         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
           {children}
         </div>
