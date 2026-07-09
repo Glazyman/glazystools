@@ -85,10 +85,6 @@ export function Hub() {
           Tool <em className="italic text-accent">Box</em>
           <span className="text-subtle">.</span>
         </h1>
-        <p className="mt-6 max-w-xl text-lg font-light leading-relaxed text-muted">
-          One desk for everything you build — search, launch, and keep your
-          AI-powered tools in a single place.
-        </p>
 
         {/* Search */}
         <div className="mt-9 w-full max-w-2xl">
