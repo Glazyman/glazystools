@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v23";
+const TOOL_VERSION = "v25";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -981,6 +981,15 @@ function Results({
   const [focused, setFocused] = useState<DisplayComment | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
 
+  // Remember whether Ask Chat was left open across reloads.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("pa:card:ask-chat") === "1") setChatOpen(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   function askAbout(c: DisplayComment) {
     setFocused(c);
     setChatOpen(true); // make sure the (collapsed) chat opens
@@ -1141,106 +1150,22 @@ function Results({
         </div>
       </div>
 
-      {/* Everything below is a collapsed dropdown — open what you want. */}
-      <Collapsible title={`ℹ️ What this ${noun} is about`}>
-        <p className="text-sm leading-relaxed text-fg">
-          {analysis?.videoSummary ?? post.caption ?? "No caption."}
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          {hasAI && (
-            <span className="inline-block rounded bg-elevated px-1.5 py-0.5 text-[11px] text-subtle">
-              transcript: {analysis!.transcriptSource}
-            </span>
-          )}
-          {post.videoUrl && (
-            <a
-              href={`/api/grab-it/download?url=${encodeURIComponent(
-                post.videoUrl,
-              )}&name=${encodeURIComponent(`${post.author}-video`)}`}
-              className="text-xs text-accent hover:underline"
-            >
-              ⬇ download video
-            </a>
-          )}
-        </div>
-      </Collapsible>
-
-      {/* AI-only sections */}
+      {/* 1) Full transcript */}
       {hasAI && (
-        <>
-          {/* The hero: what you could build from this post + its comments. */}
-          {buildIdeas.length > 0 && (
-            <Collapsible
-              title="🚀 Build ideas — what to create & how"
-              count={buildIdeas.length}
-              accent
-              defaultOpen
-            >
-              <div className="space-y-3">
-                {buildIdeas.map((idea, i) => (
-                  <BuildIdeaCard
-                    key={i}
-                    idea={idea}
-                    commentById={commentById}
-                    onAsk={askAbout}
-                  />
-                ))}
-              </div>
-            </Collapsible>
-          )}
-
-          {/* Gold nuggets: commenters sharing how they actually did it. */}
-          {playbookComments.length > 0 && (
-            <Collapsible
-              title="🛠 How they did it — playbooks from the comments"
-              count={playbookComments.length}
-              accent
-            >
-              <p className="mb-3 text-xs text-muted">
-                Comments where someone shared first-hand experience, tactics, or
-                exactly how they pulled it off — the real gold to learn from.
-              </p>
-              <div className="space-y-2">
-                {playbookComments.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => askAbout(c)}
-                    className="block w-full rounded-xl border border-border bg-elevated px-3.5 py-2.5 text-left transition-colors hover:border-accent"
-                  >
-                    <div className="mb-1 flex items-center gap-2 text-xs text-muted">
-                      <span className="font-medium text-fg">@{c.author}</span>
-                      <span>{c.likes.toLocaleString()} likes</span>
-                      <span className="ml-auto text-accent">
-                        ask about this →
-                      </span>
-                    </div>
-                    <p className="whitespace-pre-wrap text-sm text-fg">
-                      {c.text}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </Collapsible>
-          )}
-
-          <Collapsible title="📄 Full transcript">
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
-              {analysis!.transcript?.trim() ||
-                "No transcript available for this video."}
-            </p>
-          </Collapsible>
-
-          <Collapsible
-            title="What people are asking"
-            count={analysis!.audienceQuestions.length}
-          >
-            <BulletList items={analysis!.audienceQuestions} />
-          </Collapsible>
-        </>
+        <Collapsible title="📄 Full transcript" storageId="transcript">
+          <div className="mb-3 flex justify-end">
+            <CopyButton text={analysis!.transcript?.trim() || ""} />
+          </div>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
+            {analysis!.transcript?.trim() ||
+              "No transcript available for this video."}
+          </p>
+        </Collapsible>
       )}
 
       {/* Comments explorer — collapsed dropdown */}
       <Collapsible
+        storageId="comments"
         title={`💬 Comments (${post.comments.length.toLocaleString()}${
           totalComments > post.comments.length
             ? ` of ${totalComments.toLocaleString()}`
@@ -1357,11 +1282,72 @@ function Results({
         )}
       </Collapsible>
 
+      {/* 3) Build ideas — the hero: what to create from this + its comments */}
+      {hasAI && buildIdeas.length > 0 && (
+        <Collapsible
+          title="🚀 Build ideas — what to create & how"
+          count={buildIdeas.length}
+          accent
+          defaultOpen
+          storageId="build-ideas"
+        >
+          <div className="space-y-3">
+            {buildIdeas.map((idea, i) => (
+              <BuildIdeaCard
+                key={i}
+                idea={idea}
+                commentById={commentById}
+                onAsk={askAbout}
+              />
+            ))}
+          </div>
+        </Collapsible>
+      )}
+
+      {/* 4) Gold nuggets: commenters sharing how they actually did it */}
+      {hasAI && playbookComments.length > 0 && (
+        <Collapsible
+          title="🛠 How they did it — playbooks from the comments"
+          count={playbookComments.length}
+          accent
+          storageId="playbook"
+        >
+          <p className="mb-3 text-xs text-muted">
+            Comments where someone shared first-hand experience, tactics, or
+            exactly how they pulled it off — the real gold to learn from.
+          </p>
+          <div className="space-y-2">
+            {playbookComments.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => askAbout(c)}
+                className="block w-full rounded-xl border border-border bg-elevated px-3.5 py-2.5 text-left transition-colors hover:border-accent"
+              >
+                <div className="mb-1 flex items-center gap-2 text-xs text-muted">
+                  <span className="font-medium text-fg">@{c.author}</span>
+                  <span>{c.likes.toLocaleString()} likes</span>
+                  <span className="ml-auto text-accent">ask about this →</span>
+                </div>
+                <p className="whitespace-pre-wrap text-sm text-fg">{c.text}</p>
+              </button>
+            ))}
+          </div>
+        </Collapsible>
+      )}
+
       {hasAI && (
         <details
           id="grab-chat"
           open={chatOpen}
-          onToggle={(e) => setChatOpen(e.currentTarget.open)}
+          onToggle={(e) => {
+            const o = e.currentTarget.open;
+            setChatOpen(o);
+            try {
+              localStorage.setItem("pa:card:ask-chat", o ? "1" : "0");
+            } catch {
+              /* ignore */
+            }
+          }}
           className="group overflow-hidden rounded-xl border border-border bg-panel transition-colors open:border-border-strong"
         >
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold tracking-tight text-fg">
@@ -1376,28 +1362,8 @@ function Results({
               analysis={analysis!}
               focused={focused}
               onClearFocus={() => setFocused(null)}
+              quickQuestions={analysis!.audienceQuestions}
             />
-          </div>
-        </details>
-      )}
-
-      {hasAI && analysis!.draftComments.length > 0 && (
-        <details className="group overflow-hidden rounded-xl border border-border bg-panel transition-colors open:border-border-strong">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold tracking-tight text-fg">
-            <span>
-              Draft replies you could post{" "}
-              <span className="font-mono text-xs font-normal text-subtle">
-                optional
-              </span>
-            </span>
-            <span className="text-subtle transition-transform group-open:rotate-180">
-              ⌄
-            </span>
-          </summary>
-          <div className="space-y-2 border-t border-border px-5 pb-5 pt-4">
-            {analysis!.draftComments.map((c, i) => (
-              <CopyRow key={i} text={c} />
-            ))}
           </div>
         </details>
       )}
@@ -1490,11 +1456,13 @@ function ChatPanel({
   analysis,
   focused,
   onClearFocus,
+  quickQuestions,
 }: {
   post: ScrapedPost;
   analysis: Analysis;
   focused: DisplayComment | null;
   onClearFocus: () => void;
+  quickQuestions?: string[];
 }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -1772,15 +1740,21 @@ function ChatPanel({
               build on an idea. It can search the web too.
             </p>
             <div className="flex flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => send(s)}
-                  className="rounded-full border border-border bg-panel px-3 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-fg"
-                >
-                  {s}
-                </button>
-              ))}
+              {/* Audience questions ("what people are asking") surface here as
+                  quick questions, ahead of the generic suggestions. */}
+              {[
+                ...new Set([...(quickQuestions ?? []), ...SUGGESTIONS]),
+              ]
+                .slice(0, 6)
+                .map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => send(s)}
+                    className="rounded-full border border-border bg-panel px-3 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-fg"
+                  >
+                    {s}
+                  </button>
+                ))}
             </div>
           </div>
         ) : (
@@ -1904,12 +1878,14 @@ function Collapsible({
   count,
   accent,
   defaultOpen,
+  storageId,
   children,
 }: {
   title: string;
   count?: number;
   accent?: boolean;
   defaultOpen?: boolean;
+  storageId?: string; // when set, remembers open/closed across reloads
   children: React.ReactNode;
 }) {
   // Drop a leading emoji so section titles read clean and editorial.
@@ -1917,9 +1893,30 @@ function Collapsible({
     /^\s*\p{Extended_Pictographic}(?:‍\p{Extended_Pictographic})*️?\s*/u,
     "",
   );
+  const [open, setOpen] = useState(!!defaultOpen);
+  useEffect(() => {
+    if (!storageId) return;
+    try {
+      const v = localStorage.getItem(`pa:card:${storageId}`);
+      if (v !== null) setOpen(v === "1");
+    } catch {
+      /* ignore */
+    }
+  }, [storageId]);
   return (
     <details
-      open={defaultOpen}
+      open={open}
+      onToggle={(e) => {
+        const o = e.currentTarget.open;
+        setOpen(o);
+        if (storageId) {
+          try {
+            localStorage.setItem(`pa:card:${storageId}`, o ? "1" : "0");
+          } catch {
+            /* ignore */
+          }
+        }
+      }}
       className="group overflow-hidden rounded-xl border border-border bg-panel transition-colors open:border-border-strong"
     >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
@@ -2032,22 +2029,19 @@ function BulletList({ items }: { items: string[] }) {
   );
 }
 
-function CopyRow({ text }: { text: string }) {
+function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-border bg-elevated p-3">
-      <p className="flex-1 text-sm text-fg">{text}</p>
-      <button
-        onClick={() => {
-          navigator.clipboard.writeText(text);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
-        }}
-        className="shrink-0 rounded border border-border px-2 py-1 text-xs text-muted hover:bg-hover hover:text-fg"
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
-    </div>
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-elevated px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:border-accent hover:text-fg"
+    >
+      {copied ? "Copied ✓" : "⧉ Copy"}
+    </button>
   );
 }
 
