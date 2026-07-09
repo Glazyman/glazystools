@@ -21,10 +21,10 @@ export function ToolPage({
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-4 sm:px-8 sm:py-5">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-start justify-between gap-3 sm:flex-row sm:items-start sm:gap-4">
-          <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="flex w-full min-w-0 flex-1 items-start gap-3">
             {/* Name row is a dropdown — chevron on the far right reveals the
                 description, matching the other cards. Text only (no icon). */}
-            <details className="group min-w-0 flex-1">
+            <details className="group w-full min-w-0 flex-1">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-2">
                 <h1 className="text-lg font-semibold tracking-tight">
                   {tool.name}
