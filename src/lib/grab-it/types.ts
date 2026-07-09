@@ -41,6 +41,7 @@ export type BuildIdea = {
   howToBuild: string[]; // concrete first steps to actually start it
   insight: string; // the video/comment insight this is based on
   sourceCommentIds: string[]; // comments that inspired/support it (may be empty)
+  model?: string; // which model produced it, e.g. "Claude" or "Gemini Flash"
 };
 
 // Cross-run analysis when combining multiple saved videos.
