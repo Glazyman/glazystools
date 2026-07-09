@@ -47,7 +47,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v18";
+const TOOL_VERSION = "v19";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -1582,26 +1582,33 @@ function ChatPanel({
             <span className="text-sm leading-none">＋</span> New chat
           </button>
           {threads.length > 0 && (
-            <select
-              value={threadId ?? ""}
-              onChange={(e) => {
-                if (e.target.value) openThread(e.target.value);
-                else newChat();
-              }}
-              className="max-w-[200px] truncate rounded-full border border-border bg-panel px-3 py-1 text-xs text-fg focus:border-accent focus:outline-none"
-            >
-              <option value="">Current chat</option>
-              {threads.map((t) => {
-                const label = t.title?.trim() || "Untitled chat";
-                const short =
-                  label.length > 30 ? `${label.slice(0, 29).trimEnd()}…` : label;
-                return (
-                  <option key={t.id} value={t.id} title={label}>
-                    {short}
-                  </option>
-                );
-              })}
-            </select>
+            <div className="relative min-w-0">
+              <select
+                value={threadId ?? ""}
+                onChange={(e) => {
+                  if (e.target.value) openThread(e.target.value);
+                  else newChat();
+                }}
+                className="max-w-[220px] cursor-pointer appearance-none truncate rounded-full border border-border bg-panel py-1 pl-3 pr-7 text-xs font-medium text-muted transition-colors hover:border-accent hover:text-fg focus:border-accent focus:text-fg focus:outline-none"
+              >
+                <option value="">Current chat</option>
+                {threads.map((t) => {
+                  const label = t.title?.trim() || "Untitled chat";
+                  const short =
+                    label.length > 30
+                      ? `${label.slice(0, 29).trimEnd()}…`
+                      : label;
+                  return (
+                    <option key={t.id} value={t.id} title={label}>
+                      {short}
+                    </option>
+                  );
+                })}
+              </select>
+              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-subtle">
+                ⌄
+              </span>
+            </div>
           )}
         </div>
         {threads.length > 0 && (
@@ -1652,19 +1659,30 @@ function ChatPanel({
                 </span>
                 <div className="min-w-0 flex-1 pt-0.5">
                   {m.content ? (
-                    <div className="chat-md">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {m.content}
-                      </ReactMarkdown>
-                    </div>
+                    <>
+                      <div className="chat-md">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {m.content}
+                        </ReactMarkdown>
+                      </div>
+                      {/* Keeps a live "still generating" cue under the text for
+                          the whole response, not just before the first word. */}
+                      {streaming && i === messages.length - 1 && (
+                        <span className="mt-2 inline-flex gap-1 align-middle">
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-accent [animation-delay:-0.3s]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-accent [animation-delay:-0.15s]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-accent" />
+                        </span>
+                      )}
+                    </>
                   ) : (
-                    <span className="inline-flex items-center gap-2 text-xs text-subtle">
-                      <span className="inline-flex gap-1">
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle [animation-delay:-0.2s]" />
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle [animation-delay:-0.1s]" />
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-subtle" />
+                    <span className="inline-flex items-center gap-2.5 text-sm font-semibold text-accent">
+                      <span className="inline-flex gap-1.5">
+                        <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-accent [animation-delay:-0.3s]" />
+                        <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-accent [animation-delay:-0.15s]" />
+                        <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-accent" />
                       </span>
-                      Thinking…
+                      <span className="animate-pulse">Thinking…</span>
                     </span>
                   )}
                 </div>
