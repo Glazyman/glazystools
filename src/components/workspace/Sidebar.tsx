@@ -115,7 +115,7 @@ export function Sidebar({
           href="/"
           className="font-display text-[15px] font-semibold tracking-tight text-fg transition-colors hover:text-accent"
         >
-          Glazy&apos;s Tools
+          Tool Box
         </Link>
       </div>
 

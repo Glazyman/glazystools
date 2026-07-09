@@ -19,7 +19,7 @@ export function TopBar({ onMenu }: { onMenu?: () => void }) {
   const parts = crumbs(pathname);
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-bg px-2 sm:h-12 sm:px-5">
+    <header className="relative z-30 flex h-14 shrink-0 items-center justify-between border-b border-border bg-bg px-2 sm:h-12 sm:px-5">
       <div className="flex min-w-0 items-center gap-2 sm:gap-2.5">
         {/* Hamburger — mobile only (desktop toggle lives in the sidebar) */}
         <button

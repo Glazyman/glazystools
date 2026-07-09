@@ -48,7 +48,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type RunMode = "full" | "transcript" | "download";
 
 // Bumped on UI fixes; shown in the corner so stale cached JS is obvious.
-const TOOL_VERSION = "v35";
+const TOOL_VERSION = "v36";
 
 // If anything inside the results throws at render time, show the error instead
 // of white-screening / hanging the tab.
@@ -320,19 +320,24 @@ export function GrabIt() {
 
   return (
     <div className="space-y-6">
-      {/* Tabs: New · Current run (name) · Saved */}
-      <div className="flex items-center gap-1 overflow-x-auto border-b border-border">
+      {/* Tabs: New · Current run (name) · Saved — wraps + truncates to fit */}
+      <div className="flex flex-wrap items-center gap-x-1 border-b border-border">
         <TabButton active={view === "new"} onClick={startNew}>
           New
         </TabButton>
         {hasCurrent && (
-          <TabButton
-            active={view === "current"}
+          <button
             onClick={() => setView("current")}
+            className={`-mb-px flex min-w-0 max-w-[52vw] items-center border-b-2 px-3 py-2 text-sm transition-colors sm:max-w-[280px] ${
+              view === "current"
+                ? "border-accent text-fg"
+                : "border-transparent text-muted hover:text-fg"
+            }`}
           >
-            Current run
-            {post?.author ? ` · @${post.author}` : ""}
-          </TabButton>
+            <span className="truncate">
+              Current{post?.author ? ` · @${post.author}` : " run"}
+            </span>
+          </button>
         )}
         <TabButton
           active={view === "saved"}
@@ -343,7 +348,10 @@ export function GrabIt() {
         >
           Saved{saved.length > 0 ? ` (${saved.length})` : ""}
         </TabButton>
-        <span className="ml-auto pb-1 text-[10px] text-subtle" title="tool version">
+        <span
+          className="ml-auto self-center pb-1 pl-2 text-[10px] text-subtle"
+          title="tool version"
+        >
           {TOOL_VERSION}
         </span>
       </div>
