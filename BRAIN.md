@@ -9,6 +9,59 @@ obvious.
 
 ---
 
+## 2026-07-15 — "Make a new video" in Post Analysis (HyperFrames b-roll)
+
+**What it is:** a button on Post Analysis that turns an analyzed reel into a NEW
+video — keeps the original audio verbatim, replaces the visuals with AI-generated
+b-roll stills timed to the transcript, and renders via HeyGen's HyperFrames cloud.
+Full-length or a ~30s highlight. Lives in `src/lib/grab-it/video/` +
+`src/app/tools/post-analysis/MakeVideo.tsx` + `/api/grab-it/make-video[/status]`.
+
+**Pipeline:** fetch source MP4 once → timed transcript (Gemini) → scene plan (LLM)
+→ b-roll images (`generateImage`, 4-way concurrent) → composition HTML → zip →
+`POST /v3/assets` → `POST /v3/hyperframes/renders` → client polls status.
+
+**Things learned the hard way (don't re-derive these):**
+
+- **No FFmpeg needed, and none is available on Vercel.** The audio is never
+  extracted: `<audio src="assets/source.mp4">` points straight at the scraped MP4
+  and HyperFrames pulls the track itself. Trimming for the highlight cut is
+  `data-media-start` (offset into the source) — *verified* with a tone-ladder
+  test video (1000Hz dominant at -24dB vs 200Hz at -52dB on an 8s offset).
+- **`analyzePost` was deliberately NOT touched.** Its one `generateObject` already
+  does transcription + comment scoring + build ideas; adding timestamps to it
+  risks all three. The video path makes its own focused timed-transcript call,
+  and only when the button is clicked.
+- **Highlight = one CONTIGUOUS window**, not stitched moments — jump-cut audio
+  sounds broken and multi-segment needs N audio elements.
+- **Scenes hard-cut, no cross-fade.** The framework owns `.clip` visibility, so
+  animating a clip's own opacity fights it. Ken Burns carries the motion.
+- **fflate `mtime` gotcha:** ZIP encodes 1980-2099 and fflate reads the year via
+  *local* `getFullYear()`. `mtime: 0` and `Date.UTC(1980,0,1)` BOTH throw
+  ("date not in range") east of UTC. Pinned to a local-time `new Date(2000,0,1,12)`.
+- **HeyGen API shapes (guessed wrong twice, these are verified):** upload is
+  `multipart/form-data` with a `file` field (NOT a raw `application/zip` body);
+  submit wants `{ project: { type: "asset_id", asset_id } }` (NOT a top-level
+  `asset_id`). Source of truth is `buildRenderBody` in the CLI's `dist/cli.js`.
+- **Ken Burns overflow is intentional** — declared via `data-layout-allow-overflow`
+  so `hyperframes check` stays quiet (9 infos → 1).
+
+**Verified:** `hyperframes check` passes (0 errors, layout 0 issues/9 samples,
+captions 5/5 WCAG AA). Local `hyperframes render` produces 1080x1920 h264 + real
+AAC audio, 684 frames in 18s. HeyGen upload returns a real `asset_id` and submit
+passes validation.
+
+**BLOCKED ON CREDITS (both verified by live API errors):**
+
+1. **AI Gateway is free-tier** — the old "only Gemini Flash is free" comment in
+   `analyze.ts` is still true. Image models allow a brief trickle then hard-refuse
+   (`GatewayRateLimitError`). A video needs ~17 calls, so this needs paid credits.
+2. **HeyGen needs ≥9 API credits per render**; the account has
+   `hyperframes_api_render_free_credit: 5` and `remaining_quota: 0` → `402
+   insufficient_credit`. The 5 free credits can't cover even one render.
+
+`HEYGEN_API_KEY` is in `.env.local` (git-ignored) but NOT yet in Vercel env.
+
 ## 2026-07-09 — Dark-editorial redesign + Post Analysis overhaul (v20 → v38)
 
 **Design system (21st.dev-inspired "mix of two directions"):** flipped the whole

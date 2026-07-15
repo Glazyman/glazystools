@@ -32,6 +32,7 @@ import {
   updateChat,
   type ChatThreadMeta,
 } from "@/lib/grab-it/chats";
+import { MakeVideo } from "./MakeVideo";
 
 type Stage = "idle" | "scraping" | "analyzing" | "done" | "error";
 
@@ -900,6 +901,7 @@ function DownloadView({ post }: { post: ScrapedPost }) {
           )}
         </div>
         <DownloadButton post={post} />
+        <MakeVideo post={post} />
         <a
           href={post.url}
           target="_blank"
@@ -934,6 +936,7 @@ function TranscriptView({
           <div>
             <DownloadButton post={post} />
           </div>
+          <MakeVideo post={post} transcript={result.transcript} />
         </div>
       </div>
       <div className="rounded-2xl border border-border bg-panel p-5 shadow-card">
@@ -1320,6 +1323,12 @@ function Results({
             </a>
           )}
         </div>
+
+        {post.videoUrl && (
+          <div className="mx-auto mt-5 w-full max-w-[440px] text-left">
+            <MakeVideo post={post} transcript={analysis?.transcript} />
+          </div>
+        )}
       </div>
 
       {/* 1) Full transcript */}
