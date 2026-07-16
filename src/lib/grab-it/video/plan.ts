@@ -11,6 +11,11 @@ const PLAN_MODEL =
 // needs just one <audio> element with a data-media-start offset.
 const HIGHLIGHT_SECONDS = Number(process.env.GRAB_IT_HIGHLIGHT_SECONDS ?? 30);
 
+// Ceiling on b-roll stills per video. At ~45s each and 4 at a time, 16 images
+// is ~3 minutes — the most that fits under the route's 300s limit alongside
+// transcription and planning.
+const MAX_SCENES = Number(process.env.GRAB_IT_MAX_SCENES ?? 16);
+
 const schema = z.object({
   styleNote: z
     .string()
@@ -37,7 +42,7 @@ const schema = z.object({
         caption: z
           .string()
           .describe(
-            "A punchy 2-6 word on-screen caption drawn from what's said here. Empty string for no caption.",
+            "A short on-screen caption (max ~6 words) that reads as a natural phrase a person would actually write — not clipped keywords. 'Everyone said it was a terrible idea' or 'I just answered the phone', never 'Terrible idea, retiring'. Empty string when the beat is better left uncaptioned; captioning every scene is exhausting to watch.",
           ),
         motion: z.enum(["zoom-in", "zoom-out", "pan-left", "pan-right"]),
       }),
@@ -55,9 +60,14 @@ export async function planVideo(
     ? transcript.durationSeconds
     : Math.min(HIGHLIGHT_SECONDS, transcript.durationSeconds);
 
-  // Roughly one image every ~4s — enough to feel alive without the cost/time of
-  // generating an image per second.
-  const sceneCount = Math.max(2, Math.round(target / 4));
+  // Roughly one image every ~4s — enough to feel alive without generating one
+  // per second. Hard-capped because free b-roll takes ~45s an image and the
+  // whole build has to finish inside the route's 300s ceiling; past the cap,
+  // scenes just get longer rather than more numerous.
+  const sceneCount = Math.min(
+    MAX_SCENES,
+    Math.max(2, Math.round(target / 4)),
+  );
 
   const lines = transcript.segments
     .map((s) => `[${s.start.toFixed(1)}-${s.end.toFixed(1)}] ${s.text}`)
@@ -89,6 +99,7 @@ export async function planVideo(
           `Image prompt rules:`,
           `- Describe a concrete, literal, photographable scene — not an abstraction.`,
           `- Never ask for text, letters, words, numbers, logos, or watermarks; image models render them as garbage.`,
+          `- Favour places, objects, tools, and environments over people. The generator mangles faces and bodies. Where a person is unavoidable, keep them distant, turned away, or implied (a hand, a silhouette, an empty chair).`,
           `- Every prompt must fit the one styleNote so the video looks like a single piece.`,
           `- Vertical 9:16 framing.`,
         ].join("\n"),

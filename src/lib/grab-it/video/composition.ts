@@ -1,4 +1,4 @@
-import type { RenderedScene, VideoPlan } from "./types";
+import type { SceneAsset, VideoPlan } from "./types";
 
 // 9:16 — the source posts are reels/shorts.
 const WIDTH = 1080;
@@ -16,7 +16,7 @@ function escapeHtml(s: string): string {
 
 // Ken Burns start/end transforms. Scale stays above 1 throughout so the image
 // never reveals an edge as it moves.
-function motionTween(motion: RenderedScene["motion"]): {
+function motionTween(motion: SceneAsset["motion"]): {
   from: string;
   to: string;
 } {
@@ -46,7 +46,7 @@ function motionTween(motion: RenderedScene["motion"]): {
 //  - exactly one paused GSAP timeline registered on window.__timelines
 export function buildComposition(
   plan: VideoPlan,
-  scenes: RenderedScene[],
+  scenes: SceneAsset[],
   meta: { author: string },
 ): string {
   const duration = plan.duration;

@@ -40,22 +40,18 @@ export type VideoPlan = {
   scenes: VideoScene[];
 };
 
-// A scene once its image has actually been generated.
-export type RenderedScene = VideoScene & {
-  file: string; // path inside the zip, e.g. "assets/scene-01.jpg"
-  bytes: Uint8Array;
+// A scene bound to the image file that will sit under it. The bytes are
+// fetched locally by the project's own broll.mjs, not by the server — the free
+// image service allows one request at a time at ~45s each, which no serverless
+// function can sit through.
+export type SceneAsset = VideoScene & {
+  file: string; // path inside the project, e.g. "assets/scene-01.jpg"
 };
 
-export type RenderStatus =
-  | "pending"
-  | "processing"
-  | "completed"
-  | "failed";
-
-export type RenderJob = {
-  renderId: string;
-  status: RenderStatus;
-  videoUrl?: string; // short-lived presigned URL — re-fetch, don't cache
-  thumbnailUrl?: string;
-  error?: string;
+// What the build hands back to the browser alongside the project zip.
+export type BuildResult = {
+  duration: number;
+  scenes: number;
+  filename: string;
+  bytes: number;
 };

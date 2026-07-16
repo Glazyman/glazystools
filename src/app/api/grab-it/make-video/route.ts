@@ -1,11 +1,17 @@
-import { randomUUID } from "node:crypto";
-import { buildProject, submitProject } from "@/lib/grab-it/video/make";
+import { buildProject } from "@/lib/grab-it/video/make";
+import { zipProject } from "@/lib/grab-it/video/zip";
 import type { ScrapedPost } from "@/lib/grab-it/types";
 import type { VideoLength } from "@/lib/grab-it/video/types";
 
-// Transcribe + plan + ~15 image generations + upload runs ~2 min. The render
-// itself is NOT awaited — it's submitted and polled via ./status.
+// Only transcribe + plan + zip — well under the limit. The b-roll fetch and the
+// render are deliberately deferred to the project's own scripts: the free image
+// service serves one request at a time at ~45s each, which no function can wait
+// out, and rendering needs Chromium + FFmpeg that this runtime doesn't have.
 export const maxDuration = 300;
+
+function slug(s: string): string {
+  return s.replace(/[^\w-]/g, "_").slice(0, 40) || "video";
+}
 
 export async function POST(req: Request) {
   try {
@@ -24,16 +30,18 @@ export async function POST(req: Request) {
       length === "highlight" ? "highlight" : "full",
       transcript,
     );
+    const zip = zipProject(project.files);
 
-    // Scopes both the upload and the submit, so a retry can't double-bill.
-    const idempotencyKey = randomUUID();
-    const renderId = await submitProject(project, idempotencyKey);
-
-    return Response.json({
-      renderId,
-      duration: project.plan.duration,
-      scenes: project.plan.scenes.length,
-      imagesFailed: project.imagesFailed,
+    // Returns the project rather than a video. Stats ride along in headers so
+    // the UI can report them beside the download.
+    return new Response(new Uint8Array(zip), {
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": `attachment; filename="${slug(post.author)}-broll.zip"`,
+        "content-length": String(zip.byteLength),
+        "x-video-duration": project.plan.duration.toFixed(1),
+        "x-video-scenes": String(project.plan.scenes.length),
+      },
     });
   } catch (err) {
     const message =

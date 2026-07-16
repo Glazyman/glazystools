@@ -17,9 +17,17 @@ b-roll stills timed to the transcript, and renders via HeyGen's HyperFrames clou
 Full-length or a ~30s highlight. Lives in `src/lib/grab-it/video/` +
 `src/app/tools/post-analysis/MakeVideo.tsx` + `/api/grab-it/make-video[/status]`.
 
-**Pipeline:** fetch source MP4 once → timed transcript (Gemini) → scene plan (LLM)
-→ b-roll images (`generateImage`, 4-way concurrent) → composition HTML → zip →
-`POST /v3/assets` → `POST /v3/hyperframes/renders` → client polls status.
+**Pipeline (free, no keys, no accounts):** the server does the fast part —
+fetch source MP4 once → timed transcript (Gemini Flash) → scene plan (Gemini
+Flash) → zip → browser download (~20s). The project then does the slow part on
+YOUR machine, where nothing times out: `node broll.mjs` (fetches the stills)
+then `npx hyperframes render`.
+
+**Why the split — this is the load-bearing decision.** Both slow steps are
+impossible on Vercel, for different reasons: rendering needs Chromium + FFmpeg
+(absent), and the free image service serves ONE request at a time at ~45s each,
+so 16 stills is ~12 min against a 300s function ceiling. Pushing both to the
+local step is what makes the whole thing free AND able to do full-length videos.
 
 **Things learned the hard way (don't re-derive these):**
 
@@ -46,21 +54,40 @@ Full-length or a ~30s highlight. Lives in `src/lib/grab-it/video/` +
 - **Ken Burns overflow is intentional** — declared via `data-layout-allow-overflow`
   so `hyperframes check` stays quiet (9 infos → 1).
 
-**Verified:** `hyperframes check` passes (0 errors, layout 0 issues/9 samples,
-captions 5/5 WCAG AA). Local `hyperframes render` produces 1080x1920 h264 + real
-AAC audio, 684 frames in 18s. HeyGen upload returns a real `asset_id` and submit
-passes validation.
+**Pollinations (the free image source) — measured, mostly undocumented:**
 
-**BLOCKED ON CREDITS (both verified by live API errors):**
+- **One concurrent request, full stop.** Measured: concurrency 4 → 1/4 ok, 2 →
+  1/4, 1 → **4/4**. The rest are 429s. This is why `broll.mjs` is serial and why
+  it can't live on Vercel. Don't "optimise" it back to parallel.
+- `sana` is the ONLY model — `/models` returns `["sana"]`; `model=flux`/`turbo`
+  are silently ignored, `kontext` 500s.
+- Output is **always 576x1024**, whatever width/height you pass. Right 9:16
+  ratio; the composition scales it to 1080x1920. Soft if you pixel-peep, fine
+  under motion. Verified by simulating upscale + Ken Burns crop.
+- ~45s per image. `sana` mangles people (missing heads) — both the planner
+  prompt and the negative prompt steer to places/objects for this reason.
+- It's a free community service with no SLA. If it dies, the fallback is
+  Cloudflare Workers AI (10k neurons/day free ≈ ~170 images) — needs an account
+  token, and check whether flux-1-schnell can even do 9:16 before committing.
 
-1. **AI Gateway is free-tier** — the old "only Gemini Flash is free" comment in
-   `analyze.ts` is still true. Image models allow a brief trickle then hard-refuse
-   (`GatewayRateLimitError`). A video needs ~17 calls, so this needs paid credits.
-2. **HeyGen needs ≥9 API credits per render**; the account has
-   `hyperframes_api_render_free_credit: 5` and `remaining_quota: 0` → `402
-   insufficient_credit`. The 5 free credits can't cover even one render.
+**Why NOT Remotion** (asked, considered, rejected): it's a renderer, the same
+job HyperFrames already does. It generates no images, so it fixes nothing we
+were actually blocked on, and it'd mean rewriting a validated composition into
+React. Remotion Lambda also costs AWS money; local Remotion is exactly as free
+as local HyperFrames.
 
-`HEYGEN_API_KEY` is in `.env.local` (git-ignored) but NOT yet in Vercel env.
+**Verified end-to-end, free:** build 19s → `broll.mjs` 5/5 stills → `check`
+passes (0 errors, captions 5/5 WCAG AA) → `render` 9.0MB / 20.7s video in 27s,
+1080x1920 h264 + real AAC audio at -18.8dB.
+
+**The paid path was built, verified, and then removed** — it's in commit
+`4f82807` if ever wanted. It worked: HeyGen upload returned a real `asset_id`
+and submit passed validation. It died on economics, not code: a render needs
+**≥9 API credits** and HeyGen's wallet is USD (~$1 = 1 credit), so $5 wasn't
+enough — and AI Gateway image models refuse a burst on the free tier
+(`GatewayRateLimitError`), which no amount of retrying fixes. The hard-won API
+shapes are documented above in case that path ever comes back.
+`HEYGEN_API_KEY` is in `.env.local` and Vercel production env, now unused.
 
 ## 2026-07-09 — Dark-editorial redesign + Post Analysis overhaul (v20 → v38)
 
