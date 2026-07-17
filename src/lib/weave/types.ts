@@ -15,11 +15,20 @@ export const CARD_TYPES: CardType[] = [
   "decision",
 ];
 
+/** One bar of a chart card. */
+export type ChartPoint = { label: string; value: number };
+
 export type Card = {
   id: string;
   type: CardType;
   title: string;
   body: string;
+  /**
+   * Present when you spoke a SERIES of numbers ("10k in Jan, 15k in Feb") —
+   * the card draws them instead of burying them in prose. Two points minimum;
+   * one number is a sentence, not a chart.
+   */
+  chart?: ChartPoint[];
   x: number;
   y: number;
   createdAt: number;
@@ -52,6 +61,15 @@ export type Utterance = {
   status: UtteranceStatus;
   /** Cards this utterance created or updated. Empty = it was filler. */
   cardIds: string[];
+  /**
+   * What the cards this utterance CHANGED looked like before it changed them.
+   *
+   * Without this, correcting a mis-heard line is a one-way door: if the mapper
+   * wrongly folded your words into an existing card, there's no record of what
+   * that card used to say, so the correction can only ever patch the damage —
+   * never undo it and put the point where it actually belonged.
+   */
+  before?: { id: string; type: CardType; title: string; body: string }[];
 };
 
 /** A clarifying question the model wants answered out loud. */
@@ -100,6 +118,8 @@ export type Op =
       type: CardType;
       title: string;
       body: string;
+      /** A spoken series, if there was one. See Card.chart. */
+      chart?: ChartPoint[];
       /** Card ids or same-batch refs to draw an edge from. */
       connectTo?: string[];
     }

@@ -42,6 +42,17 @@ const ResultSchema = z.object({
         .describe("Card ids or same-batch refs. Empty array if none."),
     }),
   ),
+  chart: z.array(
+    z.object({
+      ref: z.string().describe('Short handle you invent, e.g. "h1"'),
+      title: z.string().describe("What the series is. 3-7 words."),
+      body: z.string().describe("ONE sentence on what it shows."),
+      points: z
+        .array(z.object({ label: z.string(), value: z.number() }))
+        .describe("At least TWO. Values as plain numbers: 10k -> 10000."),
+      connectTo: z.array(z.string()).describe("Empty array if none."),
+    }),
+  ),
   update: z.array(
     z.object({
       id: z.string(),
@@ -114,8 +125,23 @@ Saying the same idea a second time in different words is the most common thing
 people do when thinking aloud, and it must never produce a duplicate card. Match
 on meaning, not wording.
 
-A NEW point that BUILDS ON an existing card is not an update — it is its own
-card, connected back to what it came from. If the speaker adds a feature, a
+A DIFFERENT THING OF THE SAME KIND IS NOT A RESTATEMENT. Match on the specific
+thing being talked about, not its category. Two apps are two cards. Two hires
+are two cards. Two customers are two cards.
+
+  board: "Create a new app — Tinder for developers"
+  "let's make a brand new app called Glazys for basketball"
+    → NEW card. A different app, for different people. NOT an update.
+      Renaming the Tinder card to "Glazys" would destroy the first idea and
+      lose the second. This is the single worst mistake you can make.
+
+"a brand new", "another", "a different", "a separate", "a second", "also",
+"on another note" — these are the speaker telling you outright that they have
+moved to a NEW thing. When one appears, it is a new card. Never fold it into
+the card it superficially resembles.
+
+A NEW point that BUILDS ON an existing card is also not an update — it is its
+own card, connected back to what it came from. If the speaker adds a feature, a
 requirement, a consequence, a problem, or a next step for something already on
 the board, that is a new point. Cards should stay small and the relationships
 should live in the edges; do not fatten one card with everything said about it.
@@ -133,9 +159,9 @@ You may still link to it or connect new cards to it.
 
 ## Operations
 
-You return five lists: create, update, link, unlink, ask. Any of them may be
-empty, and usually ALL of them are. Never invent a card id — only ids shown on
-the board, or a ref from your own create list this batch.
+You return six lists: create, chart, update, link, unlink, ask. Any of them may
+be empty, and usually ALL of them are. Never invent a card id — only ids shown
+on the board, or a ref from your own create/chart lists this batch.
 
 create — a new distinct point. Every field is required.
   ref: a short handle you invent ("c1") so other ops in THIS batch can point at it
@@ -150,6 +176,17 @@ create — a new distinct point. Every field is required.
   body: ONE sentence of detail in the speaker's own framing. Never repeat the title.
   connectTo: ids of existing cards (or refs from this batch) this follows from.
              Use an empty array when it genuinely follows from nothing.
+
+chart — a card that DRAWS a spoken series instead of burying it in a sentence.
+  Only when the speaker gives TWO OR MORE numbers that belong on the same axis:
+  a trend over time, or the same measure across categories.
+    "10k in Jan, 15k in Feb, 22k in March"   → chart. Three points on one axis.
+    "we're at 40% on iOS and 60% on Android" → chart. Two, same measure.
+    "I want to make 10k this month"          → NOT a chart. One number → normal card.
+    "it costs 5k and takes 3 weeks"          → NOT a chart. Different units.
+  points: label is the axis tick ("Jan"), value is a plain number — convert as
+  you go: "10k" → 10000, "1.2 million" → 1200000, "40%" → 40. Never a string.
+  A chart card is INSTEAD of a normal card for that point, not as well.
 
 update — restate the card's FULL new state: { id, type, title, body }.
   You have the card in front of you; carry over the parts you aren't changing.
@@ -183,7 +220,7 @@ say. Most batches contain no ask. Phrase it as one short, direct question.
 ## Output
 
 reasoning: one short sentence.
-create / update / link / unlink / ask: the five lists, usually all empty.
+create / chart / update / link / unlink / ask: the six lists, usually all empty.
 
 Your reasoning and your lists must agree. If you say you're creating a card,
 the create list must actually contain it, complete with its title and body.`;
@@ -192,10 +229,11 @@ type Body = {
   utterance: string;
   /**
    * Set when the speaker has hand-corrected an earlier utterance's text.
-   * These are the cards that were built from the WRONG text and now need to
-   * match the corrected version.
+   * Each entry is a card the old text changed: what it says now, and what it
+   * said before — so the model can put a card back if the old text never
+   * should have touched it.
    */
-  correcting?: string[];
+  correcting?: { id: string; title: string; body: string }[];
   recent?: string[];
   cards?: {
     id: string;
@@ -259,17 +297,21 @@ ${context}
 ${
   correcting.length
     ? `## A CORRECTION — this is not new speech
-The speaker hand-fixed the text of something they said earlier, because it was
-transcribed wrong. The corrected text is:
+
+The speaker hand-fixed something they said earlier, because it was heard wrong.
+The corrected text is:
 "${utterance}"
 
-These cards were built from the WRONG text: ${correcting.join(", ")}
+Any card the old text wrongly altered has ALREADY been put back — the board
+above is accurate. These cards, though, were CREATED by the old text, so they
+are this point's home:
 
-Update those cards so they match what the speaker ACTUALLY said. Do NOT create a
-duplicate alongside them. If the correction changes the meaning enough that a
-card no longer belongs, you may still update it to the new meaning — but the
-card ids above are the ones to fix, not to replace. If the corrected text is
-only a spelling or grammar fix that doesn't change the point, return nothing.`
+${correcting.map((c) => `- id:${c.id} "${c.title}" — ${c.body}`).join("\n")}
+
+Update them to match the corrected text rather than creating a duplicate beside
+them. If the corrected text is only a spelling fix and the point is unchanged,
+return nothing. If the correction turns out to also contain a genuinely separate
+new point, that part may still get its own card.`
     : `## The new run of speech to map (said without pausing — read it as ONE thought)
 "${utterance}"`
 }
@@ -305,6 +347,23 @@ function flatten(o: z.infer<typeof ResultSchema>): Op[] {
       type: c.type,
       title: c.title,
       body: c.body,
+      connectTo: c.connectTo,
+    });
+  }
+  for (const c of o.chart) {
+    // Fewer than two points isn't a series; drop the chart rather than draw a
+    // one-bar graph. A dropped chart is better than a silly one.
+    const points = c.points.filter(
+      (p) => p.label.trim() && Number.isFinite(p.value),
+    );
+    if (!c.title.trim() || points.length < 2) continue;
+    ops.push({
+      op: "create_card",
+      ref: c.ref,
+      type: "fact", // a series is a measurement — that's what fact means here
+      title: c.title,
+      body: c.body,
+      chart: points,
       connectTo: c.connectTo,
     });
   }

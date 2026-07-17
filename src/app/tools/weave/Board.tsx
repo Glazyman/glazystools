@@ -4,13 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
+  EdgeLabelRenderer,
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  getBezierPath,
   useNodesState,
   type Connection,
   type Edge,
   type EdgeChange,
+  type EdgeProps,
   type NodeChange,
   type ReactFlowInstance,
 } from "@xyflow/react";
@@ -22,6 +26,62 @@ import { CardNode, type CardNodeType } from "./CardNode";
 // Module-level: React Flow warns (and re-mounts every node) if this identity
 // changes between renders.
 const nodeTypes = { card: CardNode };
+
+type EdgeData = { onDelete: (id: string) => void };
+
+/**
+ * An edge you can cut. Selecting it and pressing ⌫ already worked, but nothing
+ * on screen said so — this puts the scissors where the line is.
+ */
+function DeletableEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  style,
+  data,
+}: EdgeProps<Edge<EdgeData>>) {
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+  return (
+    <>
+      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
+      <EdgeLabelRenderer>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            data?.onDelete(id);
+          }}
+          title="Remove this connection"
+          // pointerEvents must be re-enabled: the whole label layer is
+          // click-through so it can't block the canvas.
+          style={{
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: "all",
+          }}
+          // Always present, just quiet — EdgeLabelRenderer portals this out of
+          // the edge's own SVG group, so "show it when the edge is hovered" has
+          // no ancestor to hang off. Faint until you go for it.
+          className="nodrag nopan absolute flex h-4 w-4 items-center justify-center rounded-full border border-border bg-panel text-[9px] leading-none text-subtle opacity-30 transition-all hover:scale-125 hover:border-accent-2 hover:text-accent-2 hover:opacity-100"
+        >
+          ✕
+        </button>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const edgeTypes = { weave: DeletableEdge };
 
 export type BoardProps = {
   boardId: string;
@@ -139,6 +199,14 @@ function Canvas({
     setNodes,
   ]);
 
+  const deleteEdge = useCallback(
+    (id: string) => {
+      onHistory();
+      onDoc((d) => ({ ...d, edges: d.edges.filter((e) => e.id !== id) }));
+    },
+    [onDoc, onHistory],
+  );
+
   const edges: Edge[] = useMemo(
     () =>
       doc.edges.map((e) => {
@@ -148,6 +216,8 @@ function Canvas({
         const on = selectedEdges.has(e.id);
         return {
           id: e.id,
+          type: "weave" as const,
+          data: { onDelete: deleteEdge },
           source: e.source,
           target: e.target,
           label: e.label,
@@ -168,7 +238,7 @@ function Canvas({
           labelBgStyle: { fill: "var(--bg-panel)" },
         };
       }),
-    [doc.edges, selectedEdges, spotlight],
+    [doc.edges, selectedEdges, spotlight, deleteEdge],
   );
 
   const onNodesChange = useCallback(
@@ -302,6 +372,7 @@ function Canvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

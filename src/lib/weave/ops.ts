@@ -46,6 +46,9 @@ export function applyOps(
     questions: [...input.questions],
   };
   const touched: string[] = [];
+  // Cards this batch OVERWROTE, as they were beforehand. Only updates — a card
+  // this batch created has no "before" worth keeping.
+  const before: NonNullable<BoardDoc["utterances"][number]["before"]> = [];
 
   // Model-invented refs ("c1") → real card ids, for same-batch references.
   const refs = new Map<string, string>();
@@ -76,6 +79,8 @@ export function applyOps(
           type: op.type,
           title: op.title.trim(),
           body: op.body.trim(),
+          // One number is a sentence, not a chart — the card says it better.
+          ...(op.chart && op.chart.length >= 2 ? { chart: op.chart } : null),
           x: pos.x,
           y: pos.y,
           createdAt: Date.now(),
@@ -94,6 +99,18 @@ export function applyOps(
         const i = doc.cards.findIndex((c) => c.id === id);
         if (i === -1) break;
         const prev = doc.cards[i];
+        // Snapshot before overwriting, so correcting the utterance later can
+        // put this card back. First writer wins: if the same batch touches a
+        // card twice, "before" must mean before the batch, not before the
+        // second op.
+        if (!prev.pinned && !before.some((b) => b.id === prev.id)) {
+          before.push({
+            id: prev.id,
+            type: prev.type,
+            title: prev.title,
+            body: prev.body,
+          });
+        }
         // A hand-edited card is the user's, not the model's. Still record the
         // utterance so the transcript link works, but leave the text alone.
         const next: Card = prev.pinned
@@ -163,7 +180,11 @@ export function applyOps(
   if (utteranceIds.length && touched.length) {
     doc.utterances = doc.utterances.map((u) =>
       utteranceIds.includes(u.id)
-        ? { ...u, cardIds: [...new Set([...u.cardIds, ...touched])] }
+        ? {
+            ...u,
+            cardIds: [...new Set([...u.cardIds, ...touched])],
+            ...(before.length ? { before } : null),
+          }
         : u,
     );
   }

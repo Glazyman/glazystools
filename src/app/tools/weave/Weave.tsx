@@ -342,7 +342,10 @@ export function Weave() {
   // ── The mapping loop ────────────────────────────────────────────────────
 
   const mapBatch = useCallback(
-    async (batch: { id: string; text: string }[], correcting?: string[]) => {
+    async (
+      batch: { id: string; text: string }[],
+      correcting?: { id: string; title: string; body: string }[],
+    ) => {
       if (!batch.length) return;
       // A response can land after you've switched boards; applying it then
       // would graft cards onto the wrong board.
@@ -459,14 +462,57 @@ export function Weave() {
       if (!clean) return;
       const u = docRef.current.utterances.find((x) => x.id === id);
       if (!u || u.text === clean) return;
+
+      // Rewind, THEN re-map — rather than asking the model to undo its own
+      // mistake. If the mishearing got folded into a card that already existed,
+      // that card is put back verbatim here, in code. The mapper then sees the
+      // board as if this line had never been said and simply maps the corrected
+      // text: which lands the point in a NEW card, because the restored card no
+      // longer looks like its home. Asking the model to restore-and-split in
+      // one step half-worked — it made the new card and left the damage.
+      //
+      // Cards this line CREATED are left standing: they're the point's home
+      // already, so the mapper updates them in place and they keep their id and
+      // their position on the board.
       pushHistory();
+      const restored = new Set((u.before ?? []).map((b) => b.id));
       updateDoc((d) => ({
         ...d,
+        cards: d.cards.map((c) => {
+          const was = u.before?.find((b) => b.id === c.id);
+          if (!was || c.pinned) return c;
+          return {
+            ...c,
+            type: was.type,
+            title: was.title,
+            body: was.body,
+            sourceUtteranceIds: c.sourceUtteranceIds.filter((x) => x !== id),
+          };
+        }),
         utterances: d.utterances.map((x) =>
-          x.id === id ? { ...x, text: clean, status: "final" } : x,
+          x.id === id
+            ? {
+                ...x,
+                text: clean,
+                status: "final",
+                cardIds: x.cardIds.filter((cid) => !restored.has(cid)),
+                before: undefined,
+              }
+            : x,
         ),
       }));
-      void mapBatch([{ id, text: clean }], u.cardIds);
+
+      // Whatever's left linked to this line is a card it created outright.
+      const owned = docRef.current.cards
+        .filter(
+          (c) =>
+            !c.pinned &&
+            c.sourceUtteranceIds.length === 1 &&
+            c.sourceUtteranceIds[0] === id,
+        )
+        .map((c) => ({ id: c.id, title: c.title, body: c.body }));
+
+      void mapBatch([{ id, text: clean }], owned);
     },
     [mapBatch, pushHistory, updateDoc],
   );

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 // the focus-out check below needs.
 import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
 import { CARD_W } from "@/lib/weave/layout";
-import type { Card, CardType } from "@/lib/weave/types";
+import type { Card, CardType, ChartPoint } from "@/lib/weave/types";
 
 // Every type maps onto an existing palette token — no new colours enter the
 // design system just because this tool needs five categories.
@@ -33,6 +33,69 @@ export type CardNodeData = {
 };
 
 export type CardNodeType = FlowNode<CardNodeData, "card">;
+
+/** Compact number for an axis: 22000 → 22k, 1200000 → 1.2M. */
+function shortNum(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${trimZero(n / 1_000_000)}M`;
+  if (abs >= 1_000) return `${trimZero(n / 1_000)}k`;
+  return trimZero(n);
+}
+function trimZero(n: number): string {
+  return n.toFixed(1).replace(/\.0$/, "");
+}
+
+/**
+ * Bars, not a charting library. A card is 300px wide and read at a glance from
+ * across a zoomed-out board — the shape of the trend is the whole payload, and
+ * anything more would be pixels nobody can see.
+ */
+function Chart({ points, color }: { points: ChartPoint[]; color: string }) {
+  // Baseline at zero unless the data goes negative; a chart that silently
+  // starts at the minimum exaggerates every trend it draws.
+  const values = points.map((p) => p.value);
+  const top = Math.max(...values, 0);
+  const bottom = Math.min(...values, 0);
+  const span = top - bottom || 1;
+
+  return (
+    <div className="nodrag mt-2.5">
+      {/* The columns must STRETCH to the row's height (no items-end): a bar's
+          height is a percentage, and a percentage of a column that shrank to
+          fit its content is a percentage of nothing. */}
+      <div className="flex h-14 gap-1">
+        {points.map((p, i) => (
+          <div
+            key={`${p.label}-${i}`}
+            className="flex h-full min-w-0 flex-1 flex-col justify-end"
+            title={`${p.label}: ${p.value.toLocaleString()}`}
+          >
+            <div
+              className="rounded-t-[2px] transition-opacity"
+              style={{
+                height: `${Math.max(2, (Math.abs(p.value - Math.max(bottom, 0)) / span) * 100)}%`,
+                background: color,
+                opacity: 0.55,
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="mt-1 flex gap-1">
+        {points.map((p, i) => (
+          <div key={`${p.label}-lbl-${i}`} className="min-w-0 flex-1">
+            <div className="truncate font-mono text-[9px] leading-tight text-fg">
+              {shortNum(p.value)}
+            </div>
+            <div className="truncate font-mono text-[9px] leading-tight text-subtle">
+              {p.label}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
   const {
@@ -185,6 +248,9 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
               <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-muted">
                 {card.body}
               </p>
+            )}
+            {card.chart && card.chart.length >= 2 && (
+              <Chart points={card.chart} color={color} />
             )}
           </>
         )}

@@ -129,7 +129,40 @@ has ideas of its own.
 
 **Delete** — red `✕` badge on the card's top-left corner, revealed on hover
 (matches Weave's own). No confirm: undo is a better answer than a dialog on
-every card. `⌫` on a selection still works too.
+every card. `⌫` on a selection still works too. Edges get a faint `⊗` at their
+midpoint (custom `DeletableEdge`). It's always visible rather than
+hover-revealed because `EdgeLabelRenderer` **portals the label out of the edge's
+SVG group** — there's no ancestor to hang a `:hover` off.
+
+**⚠️ Card hijacking (glazy hit this live).** "lets make a brand new app called
+Glazys for basketball", with "Create a new app — Tinder for developers" on the
+board, returned `update_card`: it RENAMED the Tinder card, destroying idea one
+and losing idea two. The model matched on the *category* ("making an app")
+rather than the specific thing. Fix: the prompt now says a different thing of
+the same kind is not a restatement (two apps = two cards), and calls out "a
+brand new / another / a different / a separate / a second / also" as the speaker
+explicitly signalling a new thing. Verified fixed, and a real restatement
+("basically a dating app for programmers") still correctly updates.
+
+**Correcting a transcript line = rewind, then re-map.** `Utterance.before`
+snapshots what each card said before this line changed it. On edit, the cards
+it wrongly altered are restored **in code**, then the corrected text is mapped
+against the clean board — which naturally lands the point in a new card. Asking
+the model to restore-and-split in one step half-worked: it made the new card and
+left the damage, ending up with two Glazys cards. Don't ask a model to do what
+you can do deterministically. Cards the line *created* are left standing (the
+`correcting` payload) so they keep their id and position and get updated in
+place.
+
+**Auto charts.** A spoken series becomes bars: "10k in Jan, 15k in Feb, 22k in
+March" → a `fact` card with `chart: ChartPoint[]`. Separate `chart` list in the
+map schema (not a field on every card), values coerced to plain numbers by the
+model ("10k" → 10000). Two-point minimum, enforced in code as well as prompt —
+one number is a sentence, not a chart. Verified it fires on a series and on
+same-measure categories, and does NOT fire on a lone number or mixed units.
+Chart bars are `height: %` — the columns must **stretch** (no `items-end`), or
+the percentage resolves against a column that shrank to its content and nothing
+renders.
 
 **`+ Card`** — manual card at the viewport centre, born `pinned:true` (you wrote
 it, the mapper must not rewrite it). Needs `screenToFlowPosition`, so `Board`
