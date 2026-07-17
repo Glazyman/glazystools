@@ -1328,27 +1328,46 @@ function BoardMenu({
 }) {
   const { ref, close } = useMenu();
   return (
-    // `relative` lives HERE, not on the <details>. Anchored to the chevron the
-    // menu hung off to its right, half-detached from the title it belongs to;
-    // anchored to the whole control it drops straight down under the name.
-    <div className="relative flex items-center gap-1">
-      <input
-        value={title}
-        onChange={(e) => onTitle(e.target.value)}
-        onBlur={onCommitTitle}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-        }}
-        placeholder="Untitled board"
-        className="w-40 rounded-md bg-transparent px-2 py-1 text-sm font-medium outline-none transition-colors hover:bg-elevated focus:bg-elevated"
-      />
+    // `relative` lives HERE, not on the <details>: anchored to the control, the
+    // menu drops straight down under the name instead of hanging off a chevron.
+    <div className="relative">
       <details ref={ref}>
-        <summary className="cursor-pointer list-none rounded-md px-1.5 py-1 text-xs text-subtle transition-colors hover:bg-hover hover:text-fg">
-          ⌄
+        {/* Name and chevron are one button. The name used to be a bare input
+            sitting in the toolbar — which looked like a label, behaved like a
+            field, and put renaming somewhere you'd never look for it. */}
+        <summary className="flex max-w-[240px] cursor-pointer list-none items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-elevated">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
+            {title || "Untitled board"}
+          </span>
+          <span className="shrink-0 text-xs text-subtle">⌄</span>
         </summary>
         <div className="absolute left-0 top-full z-20 mt-1.5 w-72 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
+          {/* Rename lives in here, next to the list of things it could be
+              confused with — not in the toolbar pretending to be a heading. */}
+          <div className="border-b border-border p-2">
+            <div className="mb-1.5 px-1 font-mono text-[10px] uppercase tracking-[0.14em] text-subtle">
+              Name
+            </div>
+            <input
+              value={title}
+              onChange={(e) => onTitle(e.target.value)}
+              onBlur={onCommitTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onCommitTitle();
+                  close();
+                }
+                // Don't let Escape reach the menu's own handler and shut the
+                // whole thing while you're mid-word.
+                if (e.key === "Escape") e.stopPropagation();
+              }}
+              placeholder="Untitled board"
+              className="w-full rounded-md bg-elevated px-2 py-1.5 text-xs text-fg outline-none ring-1 ring-border transition-shadow focus:ring-border-strong"
+            />
+          </div>
           <div className="border-b border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-subtle">
-            Boards
+            Switch to
           </div>
           <div className="max-h-72 overflow-y-auto py-1">
             {boards.map((b) => {
