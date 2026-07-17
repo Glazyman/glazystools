@@ -389,7 +389,18 @@ function Canvas({
   );
 
   return (
-    <div ref={wrapper} className="relative h-full w-full">
+    <div
+      ref={wrapper}
+      className="relative h-full w-full"
+      // Shift+drag is our selection box, but Shift+click is ALSO the
+      // browser's "extend text selection" gesture — without this, dragging a
+      // box paints native blue selection across the transcript rail and the
+      // rest of the page. Killing the default only when Shift is down leaves
+      // normal clicking, dragging, and text selection everywhere else alone.
+      onMouseDownCapture={(e) => {
+        if (e.shiftKey) e.preventDefault();
+      }}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
