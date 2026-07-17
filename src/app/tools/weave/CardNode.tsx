@@ -5,11 +5,15 @@ import { useEffect, useRef, useState } from "react";
 // the focus-out check below needs.
 import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
 import { CARD_W } from "@/lib/weave/layout";
-import type { Card, CardType, ChartPoint } from "@/lib/weave/types";
+import type { Attachment, Card, CardType, ChartPoint } from "@/lib/weave/types";
+import { isImage } from "@/lib/weave/attachments";
 
 // Every type maps onto an existing palette token — no new colours enter the
 // design system just because this tool needs five categories.
-const TYPE_VAR: Record<CardType, string> = {
+//
+// Exported: the card's colour IS its type, so anything that offers to change
+// the type (the right-click menu) has to show the same swatches.
+export const TYPE_VAR: Record<CardType, string> = {
   idea: "var(--accent)", // lime — a possibility
   action: "var(--live)", // green — go do it
   question: "var(--accent-2)", // orange — unresolved
@@ -30,6 +34,7 @@ export type CardNodeData = {
   onCycleType: (id: string) => void;
   onExpand: (id: string) => void;
   onDelete: (id: string) => void;
+  onOpenFile: (url: string) => void;
 };
 
 export type CardNodeType = FlowNode<CardNodeData, "card">;
@@ -97,6 +102,66 @@ function Chart({ points, color }: { points: ChartPoint[]; color: string }) {
   );
 }
 
+/**
+ * Attachments. Photos get a thumbnail because a photo you can't see is just a
+ * filename; anything else gets a chip. Clicking either opens the real file.
+ */
+function Attachments({
+  items,
+  onOpen,
+}: {
+  items: Attachment[];
+  onOpen: (url: string) => void;
+}) {
+  const images = items.filter(isImage);
+  const files = items.filter((a) => !isImage(a));
+  return (
+    <div className="nodrag mt-2.5 space-y-1.5">
+      {images.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {images.map((a) => (
+            <button
+              key={a.path}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpen(a.url);
+              }}
+              title={a.name}
+              className="overflow-hidden rounded-md border border-border transition-opacity hover:opacity-80"
+            >
+              {/* Plain <img>: these are arbitrary uploads on a canvas node, not
+                  layout-stable page content, so next/image buys nothing here. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={a.url}
+                alt={a.name}
+                className="h-14 w-14 object-cover"
+                draggable={false}
+              />
+            </button>
+          ))}
+        </div>
+      )}
+      {files.map((a) => (
+        <button
+          key={a.path}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen(a.url);
+          }}
+          title={a.name}
+          className="flex w-full items-center gap-1.5 rounded-md border border-border px-2 py-1 text-left transition-colors hover:bg-hover"
+        >
+          <span className="shrink-0 text-[10px]">📎</span>
+          <span className="min-w-0 flex-1 truncate text-[10px] text-muted">
+            {a.name}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
   const {
     card,
@@ -108,6 +173,7 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
     onCycleType,
     onExpand,
     onDelete,
+    onOpenFile,
   } = data;
   // The draft exists only while editing. Keeping no mirrored copy of the card
   // means there's nothing to re-sync when the mapper rewrites this card
@@ -251,6 +317,9 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
             )}
             {card.chart && card.chart.length >= 2 && (
               <Chart points={card.chart} color={color} />
+            )}
+            {card.attachments && card.attachments.length > 0 && (
+              <Attachments items={card.attachments} onOpen={onOpenFile} />
             )}
           </>
         )}

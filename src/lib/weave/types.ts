@@ -18,6 +18,20 @@ export const CARD_TYPES: CardType[] = [
 /** One bar of a chart card. */
 export type ChartPoint = { label: string; value: number };
 
+/**
+ * A file pinned to a card. Only ever a URL — the bytes live in Supabase
+ * Storage. Inlining a photo as base64 would re-upload the whole picture on
+ * every autosave and bloat the row past usefulness.
+ */
+export type Attachment = {
+  /** Storage path, so it can be deleted later. */
+  path: string;
+  url: string;
+  name: string;
+  /** MIME type. Anything image/* renders as a thumbnail. */
+  mime: string;
+};
+
 export type Card = {
   id: string;
   type: CardType;
@@ -29,6 +43,8 @@ export type Card = {
    * one number is a sentence, not a chart.
    */
   chart?: ChartPoint[];
+  /** Files and photos you pinned to this card. */
+  attachments?: Attachment[];
   x: number;
   y: number;
   createdAt: number;

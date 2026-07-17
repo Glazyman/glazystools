@@ -24,10 +24,13 @@ import {
   type BoardDoc,
   type BoardMeta,
   type Card,
+  type CardType,
   type OpenQuestion,
   type Op,
 } from "@/lib/weave/types";
 import { Board, type BoardApi } from "./Board";
+import { CardMenu, type CardMenuState } from "./CardMenu";
+import { deleteAttachment, uploadAttachment } from "@/lib/weave/attachments";
 import { TranscriptRail } from "./TranscriptRail";
 import { useSpeech } from "./useSpeech";
 import { download, slugify, toMarkdown } from "./export";
@@ -100,6 +103,8 @@ export function Weave() {
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [spotlight, setSpotlight] = useState<Set<string> | null>(null);
   const [expanding, setExpanding] = useState<Set<string>>(new Set());
+  const [uploading, setUploading] = useState(0);
+  const [menu, setMenu] = useState<CardMenuState | null>(null);
   const [selection, setSelection] = useState<string[]>([]);
   const [mapping, setMapping] = useState(0);
   const [consolidating, setConsolidating] = useState(false);
@@ -699,9 +704,99 @@ export function Weave() {
     flashCards([card.id]);
   }, [flashCards, pushHistory, updateDoc]);
 
+  /** A copy, offset and pinned — it's yours the moment you make it. */
+  const duplicateCard = useCallback(
+    (id: string) => {
+      const src = docRef.current.cards.find((c) => c.id === id);
+      if (!src) return;
+      const at = freeSpotNear(docRef.current, { x: src.x + 24, y: src.y + 24 });
+      const copy: Card = {
+        ...src,
+        id: crypto.randomUUID(),
+        x: at.x,
+        y: at.y,
+        createdAt: Date.now(),
+        pinned: true,
+        // Deliberately no edges and no transcript links: a copy is a new
+        // thought, not a second face on the original's relationships.
+        sourceUtteranceIds: [],
+        attachments: src.attachments ? [...src.attachments] : undefined,
+      };
+      pushHistory();
+      updateDoc((d) => ({ ...d, cards: [...d.cards, copy] }));
+      flashCards([copy.id]);
+    },
+    [flashCards, pushHistory, updateDoc],
+  );
+
+  /** Colour follows type, so this is the colour picker. */
+  const setCardType = useCallback(
+    (id: string, type: CardType) => {
+      pushHistory();
+      updateDoc((d) => ({
+        ...d,
+        cards: d.cards.map((c) => (c.id === id ? { ...c, type } : c)),
+      }));
+    },
+    [pushHistory, updateDoc],
+  );
+
+  const openFile = useCallback((url: string) => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
+  /**
+   * Attach a file. One hidden <input type=file> is reused for every card —
+   * `attachTarget` remembers which one asked, because the picker is a system
+   * dialog and can't carry the card with it.
+   */
+  const attachTarget = useRef<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const askForFile = useCallback((id: string) => {
+    attachTarget.current = id;
+    fileInput.current?.click();
+  }, []);
+
+  const onFilesPicked = useCallback(
+    async (files: FileList | null) => {
+      const id = attachTarget.current;
+      attachTarget.current = null;
+      const boardAtCall = boardIdRef.current;
+      if (!id || !files?.length || !boardAtCall) return;
+
+      setUploading((n) => n + 1);
+      try {
+        const added = await Promise.all(
+          [...files].map((f) => uploadAttachment(boardAtCall, f)),
+        );
+        if (boardIdRef.current !== boardAtCall) return;
+        pushHistory();
+        updateDoc((d) => ({
+          ...d,
+          cards: d.cards.map((c) =>
+            c.id === id
+              ? { ...c, attachments: [...(c.attachments ?? []), ...added] }
+              : c,
+          ),
+        }));
+        flashCards([id]);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't attach that.");
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    },
+    [flashCards, pushHistory, updateDoc],
+  );
+
   /** No confirm — undo (⌘Z) is a better answer than a dialog on every card. */
   const deleteCard = useCallback(
     (id: string) => {
+      // Take its files with it, or the bucket fills with orphans nothing points
+      // at. Fire-and-forget: the card goes now, regardless.
+      const card = docRef.current.cards.find((c) => c.id === id);
+      card?.attachments?.forEach((a) => void deleteAttachment(a.path));
       pushHistory();
       updateDoc((d) => removeCard(d, id));
     },
@@ -938,6 +1033,9 @@ export function Weave() {
             sharpening…
           </span>
         )}
+        {uploading > 0 && (
+          <span className="font-mono text-[10px] text-accent">attaching…</span>
+        )}
 
         <TB onClick={addCard} title="Add a card by hand">
           + Card
@@ -1084,6 +1182,8 @@ export function Weave() {
                 onCycleType={onCycleType}
                 onExpand={expandCard}
                 onDelete={deleteCard}
+                onOpenFile={openFile}
+                onCardContextMenu={(card, x, y) => setMenu({ card, x, y })}
                 onApi={handleApi}
               />
               {doc.cards.length === 0 && (
@@ -1103,6 +1203,30 @@ export function Weave() {
           ) : null}
         </div>
       </div>
+
+      {menu && (
+        <CardMenu
+          state={menu}
+          onClose={() => setMenu(null)}
+          onDuplicate={duplicateCard}
+          onSetType={setCardType}
+          onAttach={askForFile}
+          onDelete={deleteCard}
+        />
+      )}
+
+      {/* One picker for every card — see askForFile. Value is cleared each time
+          so attaching the same file twice in a row still fires a change. */}
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          void onFilesPicked(e.target.files);
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }

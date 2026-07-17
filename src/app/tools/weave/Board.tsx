@@ -108,6 +108,9 @@ export type BoardProps = {
   onCycleType: (id: string) => void;
   onExpand: (id: string) => void;
   onDelete: (id: string) => void;
+  onOpenFile: (url: string) => void;
+  /** Right-clicked a card — Weave owns the menu. */
+  onCardContextMenu: (card: CardNodeType["data"]["card"], x: number, y: number) => void;
   /** Hands Weave an imperative handle once the canvas is live. */
   onApi: (api: BoardApi) => void;
 };
@@ -139,6 +142,8 @@ function Canvas({
   onCycleType,
   onExpand,
   onDelete,
+  onOpenFile,
+  onCardContextMenu,
   onApi,
 }: BoardProps) {
   const wrapper = useRef<HTMLDivElement>(null);
@@ -194,6 +199,7 @@ function Canvas({
           onCycleType,
           onExpand,
           onDelete,
+          onOpenFile,
         },
       }));
     });
@@ -207,6 +213,7 @@ function Canvas({
     onCycleType,
     onExpand,
     onDelete,
+    onOpenFile,
     setNodes,
   ]);
 
@@ -394,6 +401,10 @@ function Canvas({
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onSelectionChange={onSelectionChange}
+        onNodeContextMenu={(e, node) => {
+          e.preventDefault();
+          onCardContextMenu(node.data.card, e.clientX, e.clientY);
+        }}
         onEdgeMouseEnter={(_, e) => setHoveredEdge(e.id)}
         onEdgeMouseLeave={() => setHoveredEdge(null)}
         onInit={(inst) => {
