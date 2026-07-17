@@ -10,6 +10,7 @@ export function ToolPage({
   children,
   actions,
   bleed = false,
+  hideHeader = false,
 }: {
   slug: string;
   children: ReactNode;
@@ -20,12 +21,19 @@ export function ToolPage({
    * where the centred scrolling column would be actively wrong.
    */
   bleed?: boolean;
+  /**
+   * Drop the name/description header entirely. For immersive tools that carry
+   * their own chrome and want every pixel — the breadcrumb in the top bar
+   * already says where you are, so the heading is just a second label.
+   */
+  hideHeader?: boolean;
 }) {
   const tool = getTool(slug);
   if (!tool) notFound();
 
   return (
     <div className="flex h-full flex-col">
+      {!hideHeader && (
       <div className="border-b border-border px-4 py-4 sm:px-8 sm:py-5">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-start justify-between gap-3 sm:flex-row sm:items-start sm:gap-4">
           <div className="flex w-full min-w-0 flex-1 items-start gap-3">
@@ -48,6 +56,7 @@ export function ToolPage({
           {actions && <div className="flex items-center gap-2">{actions}</div>}
         </div>
       </div>
+      )}
       {bleed ? (
         <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
       ) : (

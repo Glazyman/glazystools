@@ -1,0 +1,60 @@
+/* Weave — a light whiteboard inside a dark workspace.
+ *
+ * Rather than hard-coding colours into the components, this re-points the SAME
+ * semantic tokens the rest of the app uses (--bg, --panel, --fg, --border …) at
+ * light values, scoped to this subtree. Every `bg-panel` / `text-muted` /
+ * `border-border` inside Weave then flips on its own, no component knows a
+ * theme exists, and nothing outside `.weave-light` is affected.
+ *
+ * Accents keep their hue but go darker: the lime that reads well on #0b0b0d is
+ * invisible on white, and these are used for text and 1.5px strokes, not just
+ * fills. Same brand, legible contrast.
+ */
+
+.weave-light {
+  /* Surfaces — white canvas, white cards, grey fills for inputs. */
+  --bg: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-elevated: #f4f4f5;
+  --bg-hover: #ececef;
+
+  /* Lines — light enough to be quiet, dark enough to define a card edge. */
+  --border: #e4e4e8;
+  --border-strong: #c9c9d0;
+
+  /* Text */
+  --fg: #18181b;
+  --fg-muted: #5f5f6a;
+  --fg-subtle: #9a9aa5;
+
+  /* Brand — same hues, darkened for contrast on white. */
+  --accent: #5f7d00;
+  --accent-strong: #4d6600;
+  --accent-2: #d0451b;
+
+  /* Card types */
+  --live: #0f8a52;
+  --wip: #a1670a;
+  --planned: #71717a;
+
+  /* A real shadow instead of the dark theme's inset highlight — this is what
+     makes cards sit *above* the whiteboard rather than being cut out of it. */
+  --shadow-card:
+    0 1px 2px rgba(24, 24, 27, 0.05), 0 4px 12px -2px rgba(24, 24, 27, 0.08);
+
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* The workspace's global rule paints every border with the dark token; inside
+   Weave the light one has to win, including on React Flow's own elements. */
+.weave-light * {
+  border-color: var(--border);
+}
+
+/* React Flow paints its attribution/controls against a light default already,
+   but the selection rectangle uses its own blue. Keep it on-brand. */
+.weave-light .react-flow__selection {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid var(--accent);
+}

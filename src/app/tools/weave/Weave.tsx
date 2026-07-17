@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { tidy } from "@/lib/weave/layout";
 import { applyOps } from "@/lib/weave/ops";
 import {
@@ -23,8 +30,10 @@ import { Board } from "./Board";
 import { TranscriptRail } from "./TranscriptRail";
 import { useSpeech } from "./useSpeech";
 import { download, slugify, toMarkdown } from "./export";
+import "./weave.css";
 
 const LAST_BOARD = "weave:lastBoard";
+const RAIL_OPEN = "weave:railOpen";
 
 // ── Batching ──────────────────────────────────────────────────────────────
 //
@@ -60,6 +69,24 @@ export function Weave() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+
+  // Rail open/closed, remembered across sessions. Read via useSyncExternalStore
+  // rather than an effect: localStorage doesn't exist during SSR, and reading it
+  // in a lazy useState initialiser would break the server render.
+  const railStored = useSyncExternalStore(
+    () => () => {},
+    () => localStorage.getItem(RAIL_OPEN) !== "0",
+    () => true, // server: assume open, so it never flashes shut on hydrate
+  );
+  const [railOverride, setRailOverride] = useState<boolean | null>(null);
+  const railOpen = railOverride ?? railStored;
+  const toggleRail = useCallback(() => {
+    setRailOverride((prev) => {
+      const next = !(prev ?? localStorage.getItem(RAIL_OPEN) !== "0");
+      localStorage.setItem(RAIL_OPEN, next ? "1" : "0");
+      return next;
+    });
+  }, []);
 
   // docRef is the real source of truth. Async work (a map response landing
   // seconds later) must never read a stale doc from a closure, so every
@@ -560,9 +587,20 @@ export function Weave() {
   const busy = mapping > 0;
 
   return (
-    <div className="flex h-full flex-col">
+    // weave-light re-points the shared design tokens at light values for this
+    // subtree only — see weave.css. The workspace stays dark; the board is a
+    // whiteboard.
+    <div className="weave-light flex h-full flex-col">
       {/* Toolbar */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+        <button
+          onClick={toggleRail}
+          title={railOpen ? "Hide transcript" : "Show transcript"}
+          className="rounded-md border border-border px-2 py-1 font-mono text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg"
+        >
+          {railOpen ? "◧" : "▢"}
+        </button>
+
         <BoardMenu
           boards={boards}
           boardId={boardId}
@@ -704,21 +742,24 @@ export function Weave() {
 
       {/* Rail + canvas */}
       <div className="flex min-h-0 flex-1">
-        <TranscriptRail
-          utterances={doc.utterances}
-          interim={interim}
-          questions={doc.questions}
-          listening={listening}
-          level={speech.level}
-          onSpotlight={(ids) => setSpotlight(ids ? new Set(ids) : null)}
-          onDismissQuestion={(id) =>
-            updateDoc((d) => ({
-              ...d,
-              questions: d.questions.filter((q) => q.id !== id),
-            }))
-          }
-          onAnswerQuestion={answerQuestion}
-        />
+        {railOpen && (
+          <TranscriptRail
+            utterances={doc.utterances}
+            interim={interim}
+            questions={doc.questions}
+            listening={listening}
+            level={speech.level}
+            onSpotlight={(ids) => setSpotlight(ids ? new Set(ids) : null)}
+            onClose={toggleRail}
+            onDismissQuestion={(id) =>
+              updateDoc((d) => ({
+                ...d,
+                questions: d.questions.filter((q) => q.id !== id),
+              }))
+            }
+            onAnswerQuestion={answerQuestion}
+          />
+        )}
 
         <div className="relative min-w-0 flex-1">
           {loading ? (

@@ -74,16 +74,28 @@ pauses, which may be a single fragment or several sentences — plus the board
 that already exists. You return a list of operations. You are the difference
 between a useful map and a wall of noise, so you are conservative by default.
 
-## Read the run as one thought
+## Read the run as one thought — but judge its points separately
 
-The sentences in the run belong together; the speaker said them without
-stopping. Usually they are one point approached from a few angles, NOT one point
-per sentence. "I need a patent app. Well, the real problem is the USPTO backlog.
-So maybe ship without the API." is one line of reasoning: at most a card for the
-idea and a card for the constraint, connected — not three.
+The sentences in a run belong together; the speaker said them without stopping.
+They are usually one point approached from a few angles, NOT one point per
+sentence. "I need a patent app. Well, the real problem is the USPTO backlog. So
+maybe ship without the API." is one line of reasoning: a card for the idea and a
+card for the constraint, connected — not three.
 
 Extract the POINTS in the run, not the sentences. A four-sentence run very often
 deserves exactly one card, and quite often none.
+
+BUT a run is frequently a MIXTURE, and every point in it stands on its own.
+Judge each one independently against the board. If the speaker restates
+something already on the board and THEN says something genuinely new, the
+restatement is skipped and the new thing STILL GETS ITS CARD. One point being
+old tells you nothing whatsoever about the next one.
+
+Never let a restatement at the start of a run swallow a real idea at the end of
+it. Read to the end of the run before you decide anything. Silently dropping a
+new idea is the worst thing you can do here — worse than an extra card, worse
+than a wrong type. If any part of the run is new and substantive, it must
+survive.
 
 ## The single most important rule
 

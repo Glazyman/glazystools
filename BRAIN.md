@@ -54,8 +54,30 @@ settle with the original text or the card never appears. MediaRecorder timeslice
 chunks are bare EBML clusters: the **first chunk's header must be re-prepended**
 to every slice or it won't decode.
 
-**Shell change:** `ToolPage` gained a generic `bleed` prop (no max-width, no
-page scroll) for tools that own their viewport. Kept generic per golden rule 3.
+**Shell change:** `ToolPage` gained generic `bleed` (no max-width, no page
+scroll) and `hideHeader` props for tools that own their viewport. Kept generic
+per golden rule 3.
+
+**Light theme, scoped.** Weave is a *white* whiteboard inside the dark
+workspace. `weave.css` re-points the SAME semantic tokens (`--bg`, `--panel`,
+`--fg`, `--border`, accents) at light values under a single `.weave-light`
+class. Every component flips on its own, none of them know a theme exists, and
+nothing outside the scope changes — no component needed editing and no raw hex
+entered the components (golden rule 5 in spirit). Accents keep their hue but
+darken: `--accent` lime `#d8ff3e` → `#5f7d00`, since it's used for text and
+1.5px strokes, and the dark-theme lime is invisible on white.
+
+**⚠️ Batching regression (found by watching glazy's real speech, not a test):**
+"I want an app for patenting. I want an app like Tinder for devs." returned ZERO
+ops — the mapper judged the whole run a restatement and silently ate the second,
+genuinely new idea. Cause: the prompt's "read the run as ONE thought" was too
+strong, so one point's verdict decided the whole run. Fix: the prompt now says a
+run is frequently a MIXTURE and each point is judged independently — a
+restatement tells you nothing about the point beside it, and dropping a new idea
+is the worst available outcome. Verified: mixed run → new card survives; pure
+restatement → still 0; pure filler → still 0. **Lesson: batching trades a
+per-sentence prompt for a per-run one, and the run prompt must be explicit that
+runs are heterogeneous.**
 
 **Batched mapping (not per-sentence).** Utterances buffer in `pending` and flush
 as ONE call after `PAUSE_MS` 1500ms of silence (or `MAX_BATCH` 6 / `MAX_WAIT_MS`
