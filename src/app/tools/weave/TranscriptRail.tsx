@@ -16,6 +16,11 @@ export type TranscriptRailProps = {
   level: number;
   /** Whatever the talk key is currently bound to, for the empty state. */
   talkKeyLabel: string;
+  /** A spoken deletion waiting for a hand to confirm it. Lives with the
+   *  questions: it IS one — the most consequential kind. */
+  deleteAsk: { titles: string[] } | null;
+  onDeleteConfirm: () => void;
+  onDeleteKeep: () => void;
   onSpotlight: (cardIds: string[] | null) => void;
   /** Typed instead of spoken. */
   onSubmitText: (text: string) => void;
@@ -32,6 +37,9 @@ export function TranscriptRail({
   highlight,
   interim,
   questions,
+  deleteAsk,
+  onDeleteConfirm,
+  onDeleteKeep,
   listening,
   level,
   talkKeyLabel,
@@ -247,9 +255,36 @@ export function TranscriptRail({
 
       <div className="border-t border-border px-4 py-3">
         <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-subtle">
-          Questions for you {questions.length > 0 && `(${questions.length})`}
+          Questions for you{" "}
+          {questions.length + (deleteAsk ? 1 : 0) > 0 &&
+            `(${questions.length + (deleteAsk ? 1 : 0)})`}
         </div>
-        {questions.length === 0 ? (
+        {deleteAsk && (
+          <div
+            className="mb-2 rounded-[10px] border border-dashed px-3 py-2"
+            style={{ borderColor: "var(--accent-2)" }}
+          >
+            <p className="text-xs italic leading-relaxed text-fg">
+              You asked to delete{" "}
+              {deleteAsk.titles.map((t) => `“${t}”`).join(", ")} — sure?
+            </p>
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                onClick={onDeleteConfirm}
+                className="font-mono text-[10px] uppercase tracking-wider text-accent-2 transition-opacity hover:opacity-70"
+              >
+                Delete
+              </button>
+              <button
+                onClick={onDeleteKeep}
+                className="font-mono text-[10px] uppercase tracking-wider text-subtle transition-colors hover:text-fg"
+              >
+                Keep
+              </button>
+            </div>
+          </div>
+        )}
+        {questions.length === 0 && !deleteAsk ? (
           <p className="text-xs text-subtle">None open.</p>
         ) : (
           <div className="max-h-40 space-y-2 overflow-y-auto">

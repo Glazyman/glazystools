@@ -1706,24 +1706,6 @@ export function Weave() {
           </button>
         </Banner>
       )}
-      {confirmDeletes && (
-        <Banner tone="accent-2" onDismiss={() => setConfirmDeletes(null)}>
-          You asked to delete{" "}
-          {confirmDeletes.titles.map((t) => `“${t}”`).join(", ")} — sure?{" "}
-          <button
-            onClick={applySpokenDeletes}
-            className="ml-2 rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-opacity hover:opacity-70"
-          >
-            Delete
-          </button>{" "}
-          <button
-            onClick={() => setConfirmDeletes(null)}
-            className="ml-1 rounded border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-subtle transition-colors hover:text-fg"
-          >
-            Keep
-          </button>
-        </Banner>
-      )}
 
       {/* Rail + canvas */}
       <div className="flex min-h-0 flex-1">
@@ -1733,6 +1715,9 @@ export function Weave() {
             highlight={railHighlight}
             interim={interim}
             questions={doc.questions}
+            deleteAsk={confirmDeletes}
+            onDeleteConfirm={applySpokenDeletes}
+            onDeleteKeep={() => setConfirmDeletes(null)}
             listening={listening}
             level={speech.level}
             talkKeyLabel={keyLabel(talkKey)}
