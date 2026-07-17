@@ -186,6 +186,30 @@ without the API" surfaced *"Manual upload vs. 'fast' promise"*, the
 contradiction between them. On a button, never automatic: the one place Weave
 has ideas of its own.
 
+**Right-click a card** → Duplicate · Attach file or photo · Type · Delete.
+Right-click, not left: left-click already selects and drags, so a menu there
+would fire on every touch of a card.
+- **Duplicate** is offset, `pinned`, and deliberately carries neither the
+  original's edges nor its `sourceUtteranceIds` — a copy is a new thought, not
+  a second face on the original's relationships.
+- **Type is the colour picker.** Colour IS type here; keeping them welded is the
+  only reason a zoomed-out board still means anything. A free-colour option was
+  offered and declined for exactly that reason.
+- **Attachments** go to Supabase Storage (`docs/weave-storage.sql`: bucket +
+  anon policies, already run on prod). The card keeps a URL — inlining a photo
+  as base64 would re-upload the whole picture on every autosave and bloat the
+  row. Object path is `boardId/uuid.ext`, so same-named photos can't collide and
+  URLs aren't guessable. Public-read bucket: fine for a password-gated
+  single-user tool, but **don't put anything sensitive on a card**. Deleting a
+  card removes its files too (fire-and-forget — a failed cleanup must never
+  block the delete), or the bucket fills with orphans nothing points at.
+
+**⚠️ Tailwind's `group-open:` emits nothing in this build** — not one
+rotate-180 rule in the output — so every `<details>` chevron using it was
+silently frozen, ToolPage's included. Fixed globally with a plain `.chevron`
+rule in globals.css, which also works in server components where a state-driven
+flip can't.
+
 **Delete** — red `✕` badge on the card's top-left corner, revealed on hover
 (matches Weave's own). No confirm: undo is a better answer than a dialog on
 every card. `⌫` on a selection still works too. Edges get a faint `⊗` at their
