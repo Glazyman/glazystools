@@ -520,7 +520,6 @@ export function Weave() {
       type: "idea",
       title: "New card",
       body: "",
-      confidence: 1,
       x: at.x,
       y: at.y,
       createdAt: Date.now(),
@@ -604,7 +603,6 @@ export function Weave() {
           type: "question",
           title: q.text,
           body: "",
-          confidence: 1,
           connectTo: q.cardId ? [q.cardId] : undefined,
         },
       ];
@@ -709,7 +707,7 @@ export function Weave() {
     <div
       className={[
         "weave-root flex h-full flex-col",
-        theme === "light" ? "weave-light" : "",
+        theme === "light" ? "weave-light" : "weave-dark",
       ].join(" ")}
     >
       {/* Toolbar */}

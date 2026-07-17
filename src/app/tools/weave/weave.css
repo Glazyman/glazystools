@@ -1,21 +1,70 @@
-/* Weave — a themeable board inside a dark workspace.
+/* Weave — two themes for the board, inside a permanently dark workspace.
  *
- * Dark needs no rules at all: the workspace's :root tokens already are the dark
- * theme, so `.weave-root` alone inherits it. Light is `.weave-root.weave-light`,
- * which re-points the SAME semantic tokens (--bg, --panel, --fg, --border …) at
- * light values for this subtree only. Every `bg-panel` / `text-muted` /
- * `border-border` inside Weave flips on its own, no component knows a theme
- * exists, and nothing outside the scope is affected.
+ * Both re-point the SAME semantic tokens (--bg, --panel, --fg, --border …) for
+ * this subtree only. Every `bg-panel` / `text-muted` / `border-border` inside
+ * Weave flips on its own, no component knows a theme exists, and nothing
+ * outside the scope is affected.
  *
- * Light accents keep their hue but go darker: the lime that reads well on
- * #0b0b0d is invisible on white, and these are used for text and 1.5px strokes,
- * not just fills. Same brand, legible contrast.
+ *   .weave-light — a whiteboard. Accents keep their hue but darken: the lime
+ *                  that reads well on #0b0b0d is invisible on white, and these
+ *                  are used for text and 1.5px strokes, not just fills.
+ *   .weave-dark  — neon. Near-black field, cards lit in their type colour.
  */
 
 /* Both themes: keep React Flow's own blue selection rect on-brand. */
 .weave-root .react-flow__selection {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: 1px solid var(--accent);
+}
+
+/* ── Dark = neon ──────────────────────────────────────────────────────────
+   Cards are lit objects on a near-black field rather than paper on a desk.
+   Same five type colours, pushed to their neon register — on #08080c the
+   muted greys of the workspace palette just read as dead. */
+
+.weave-dark {
+  --bg: #08080c; /* darker than the workspace: the glow needs somewhere to fall */
+  --bg-panel: #0f0f16;
+  --bg-elevated: #16161f;
+  --bg-hover: #1e1e2a;
+
+  --border: #22222e;
+  --border-strong: #353546;
+
+  --fg: #f4f4f7;
+  --fg-muted: #9494a6;
+  --fg-subtle: #5c5c6e;
+
+  --accent: #d8ff3e;
+  --accent-strong: #c2e82a;
+  --accent-2: #ff4d6d;
+
+  --live: #3dffa5;
+  --wip: #ffd93d;
+  --planned: #7aa2ff; /* grey has no neon register — this is "fact" */
+
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* The glow. --card is set inline per node from the card's type, so one rule
+   covers all five types and any we add later. */
+.weave-dark .weave-card {
+  background: var(--bg-panel);
+  border-color: color-mix(in srgb, var(--card) 45%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--card) 22%, transparent),
+    0 0 22px -6px color-mix(in srgb, var(--card) 55%, transparent),
+    0 10px 30px -14px rgb(0 0 0 / 0.9);
+}
+
+/* Lean into it on hover/selection rather than changing colour. */
+.weave-dark .weave-card:hover {
+  border-color: color-mix(in srgb, var(--card) 70%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--card) 35%, transparent),
+    0 0 34px -6px color-mix(in srgb, var(--card) 70%, transparent),
+    0 10px 30px -14px rgb(0 0 0 / 0.9);
 }
 
 .weave-light {

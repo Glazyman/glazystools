@@ -36,7 +36,6 @@ const ResultSchema = z.object({
       type: TypeEnum,
       title: z.string().describe("3-7 words. The point itself. Required."),
       body: z.string().describe("ONE sentence of detail. Required."),
-      confidence: z.number().min(0).max(1),
       connectTo: z
         .array(z.string())
         .describe("Card ids or same-batch refs. Empty array if none."),
@@ -48,7 +47,6 @@ const ResultSchema = z.object({
       type: TypeEnum,
       title: z.string().describe("The card's full new title."),
       body: z.string().describe("The card's full new body."),
-      confidence: z.number().min(0).max(1),
     }),
   ),
   link: z.array(
@@ -149,11 +147,10 @@ create — a new distinct point. Every field is required.
   title: 3-7 words, no trailing period. The point itself, not a description of it.
          NEVER omit this and never leave it empty — a card with no title is useless.
   body: ONE sentence of detail in the speaker's own framing. Never repeat the title.
-  confidence: 0-1. How sure you are this is a real, distinct, substantive point.
   connectTo: ids of existing cards (or refs from this batch) this follows from.
              Use an empty array when it genuinely follows from nothing.
 
-update — restate the card's FULL new state: { id, type, title, body, confidence }.
+update — restate the card's FULL new state: { id, type, title, body }.
   You have the card in front of you; carry over the parts you aren't changing.
 link — { source, target, label } a relationship between two cards already on the
   board. label is "" unless a short word genuinely clarifies it.
@@ -280,7 +277,6 @@ function flatten(o: z.infer<typeof ResultSchema>): Op[] {
       type: c.type,
       title: c.title,
       body: c.body,
-      confidence: c.confidence,
       connectTo: c.connectTo,
     });
   }
@@ -292,7 +288,6 @@ function flatten(o: z.infer<typeof ResultSchema>): Op[] {
       type: u.type,
       title: u.title,
       body: u.body,
-      confidence: u.confidence,
     });
   }
   for (const l of o.link) {

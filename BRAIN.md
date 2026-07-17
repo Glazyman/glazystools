@@ -58,15 +58,27 @@ to every slice or it won't decode.
 scroll) and `hideHeader` props for tools that own their viewport. Kept generic
 per golden rule 3.
 
-**Themeable board, scoped (☾/☀ in the toolbar, light default).** `weave.css`
+**Two board themes, scoped (☾/☀ in the toolbar, light default).** `weave.css`
 re-points the SAME semantic tokens (`--bg`, `--panel`, `--fg`, `--border`,
-accents) at light values under `.weave-light`. Every component flips on its own,
+accents) under `.weave-light` / `.weave-dark`. Every component flips on its own,
 none of them know a theme exists, nothing outside the scope changes — no
 component needed editing and no raw hex entered them (golden rule 5 in spirit).
-**Dark needs no CSS at all**: the workspace's `:root` tokens already *are* the
-dark theme, so dark is simply the absence of the class. Light accents keep their
-hue but darken (`--accent` `#d8ff3e` → `#5f7d00`) — they're used for text and
-1.5px strokes, and the dark-theme lime is invisible on white.
+- **light** — a whiteboard. Accents keep their hue but darken (`--accent`
+  `#d8ff3e` → `#5f7d00`): they're used for text and 1.5px strokes, and the
+  dark-theme lime is invisible on white.
+- **dark** — neon (per glazy's Weave reference). Near-black `#08080c` field,
+  cards lit in their type colour. The glow is ONE rule: `.weave-dark
+  .weave-card` reads the `--card` var each node already sets inline from its
+  type, so all five types (and any added later) are covered by
+  `color-mix(in srgb, var(--card) …)` in the border + box-shadow. `--planned`
+  (fact) goes grey → `#7aa2ff`; grey has no neon register.
+
+**No confidence score.** Cut entirely — model, schemas, prompts, UI. It was
+meant to separate "you clearly said this" from "half-caught from a mumble", but
+models can't self-rate: every AI card came back ~100%, so the dots and % were
+decoration. An unused required field still costs prompt tokens and model
+attention on every card, so it went from `Card`, all three route schemas, and
+the reducer — not just the UI.
 
 **⚠️ StrictMode ate a persisted setting.** Both toggles first wrote
 localStorage *inside* the `setState` updater. StrictMode double-invokes updaters
@@ -99,7 +111,7 @@ doc→nodes sync effect early-returns while `dragging.current` — otherwise an
 utterance landing mid-drag snaps the card back to the position the doc still
 remembers. Selection moved to RF's `onSelectionChange`.
 
-**Expand a node** (`+` on the card's footer by the confidence % →
+**Expand a node** (`✨ Expand` on the card's footer, on hover →
 `/api/weave/expand`). Suggested next cards: what this card makes necessary,
 possible, or risky. 2-4 cards, all `connectTo` the source. `temperature: 0.7`
 (vs the mapper's 0.2 — here we want range, not caution). **THE CARD IS THE

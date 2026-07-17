@@ -71,7 +71,6 @@ export function applyOps(
           type: op.type,
           title: op.title.trim(),
           body: op.body.trim(),
-          confidence: clamp(op.confidence),
           x: pos.x,
           y: pos.y,
           createdAt: Date.now(),
@@ -99,10 +98,6 @@ export function applyOps(
               title: op.title?.trim() ?? prev.title,
               body: op.body?.trim() ?? prev.body,
               type: op.type ?? prev.type,
-              confidence:
-                op.confidence !== undefined
-                  ? clamp(op.confidence)
-                  : prev.confidence,
             };
         next.sourceUtteranceIds = [
           ...new Set([...next.sourceUtteranceIds, ...utteranceIds]),
@@ -169,11 +164,6 @@ export function applyOps(
   }
 
   return { doc, touched };
-}
-
-function clamp(n: number): number {
-  if (!Number.isFinite(n)) return 0.5;
-  return Math.min(1, Math.max(0, n));
 }
 
 /** Removing a card must take its edges and transcript links with it. */

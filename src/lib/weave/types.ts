@@ -20,8 +20,6 @@ export type Card = {
   type: CardType;
   title: string;
   body: string;
-  /** The model's confidence that this card is a real, distinct point. 0–1. */
-  confidence: number;
   x: number;
   y: number;
   createdAt: number;
@@ -97,7 +95,6 @@ export type Op =
       type: CardType;
       title: string;
       body: string;
-      confidence: number;
       /** Card ids or same-batch refs to draw an edge from. */
       connectTo?: string[];
     }
@@ -107,7 +104,6 @@ export type Op =
       title?: string;
       body?: string;
       type?: CardType;
-      confidence?: number;
     }
   | { op: "link"; source: string; target: string; label?: string }
   | { op: "unlink"; source: string; target: string }

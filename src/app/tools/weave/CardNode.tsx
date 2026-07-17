@@ -70,14 +70,15 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
   };
 
   const color = TYPE_VAR[card.type];
-  const dots = Math.max(1, Math.round(card.confidence * 4));
 
   return (
     <div
       style={{ width: CARD_W, ["--card" as string]: color }}
       onDoubleClick={() => setDraft({ title: card.title, body: card.body })}
       className={[
-        "group relative rounded-[var(--radius)] border bg-panel shadow-card transition-all duration-200",
+        // weave-card is the hook the neon dark theme hangs its per-type glow
+        // off — it reads the --card var set just above.
+        "weave-card group relative rounded-[var(--radius)] border bg-panel shadow-card transition-all duration-200",
         selected ? "border-[var(--card)]" : "border-border",
         flash ? "ring-2 ring-[var(--card)] ring-offset-2 ring-offset-bg" : "",
         dimmed ? "opacity-25" : "opacity-100",
@@ -189,21 +190,6 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
         )}
 
         <div className="mt-3 flex items-center gap-2">
-          <div className="flex gap-1">
-            {[0, 1, 2, 3].map((i) => (
-              <span
-                key={i}
-                className="h-1.5 w-1.5 rounded-full"
-                style={{
-                  background: i < dots ? color : "var(--border-strong)",
-                }}
-              />
-            ))}
-          </div>
-          <span className="font-mono text-[10px] text-subtle">
-            {Math.round(card.confidence * 100)}%
-          </span>
-
           {/* Suggest next cards off this one. Reveal on hover — a deliberate
               act, not something to fire by accident while dragging. */}
           <button
@@ -214,14 +200,15 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
             disabled={expanding}
             title="Suggest next steps from this card"
             className={[
-              "nodrag flex h-4 w-4 items-center justify-center rounded font-mono text-[11px] leading-none transition-opacity",
+              "nodrag flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] leading-none transition-opacity",
               expanding
                 ? "animate-pulse opacity-100"
                 : "opacity-0 group-hover:opacity-100 hover:bg-hover",
             ].join(" ")}
-            style={{ color }}
+            style={{ color, borderColor: color }}
           >
-            {expanding ? "·" : "+"}
+            <span className="text-[13px] leading-none">✨</span>
+            {expanding ? "Thinking…" : "Expand"}
           </button>
 
           {linkCount > 0 && (

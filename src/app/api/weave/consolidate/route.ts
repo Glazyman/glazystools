@@ -33,7 +33,6 @@ const ResultSchema = z.object({
       type: TypeEnum,
       title: z.string().describe("The card's full new title. Required."),
       body: z.string().describe("The card's full new body. Required."),
-      confidence: z.number().min(0).max(1),
     }),
   ),
   remove: z.array(
@@ -102,7 +101,7 @@ it. Be strict about what counts: if it carries any real content, it stays.
 You return five lists: update, remove, link, unlink, ask. Any may be empty and
 usually all are. Only ever reference ids that appear on the board above.
 
-update — restate the card's FULL new state: { id, type, title, body, confidence }.
+update — restate the card's FULL new state: { id, type, title, body }.
   You can see the card; carry over verbatim whatever you aren't changing. Never
   leave title or body empty.
 remove — { id, reason } a duplicate you merged away, or genuine junk. The reason
@@ -196,7 +195,6 @@ function flatten(o: z.infer<typeof ResultSchema>): Op[] {
       type: u.type,
       title: u.title,
       body: u.body,
-      confidence: u.confidence,
     });
   }
   for (const r of o.remove) {

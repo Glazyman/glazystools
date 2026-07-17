@@ -25,7 +25,6 @@ const ResultSchema = z.object({
         type: z.enum(CARD_TYPES as [CardType, ...CardType[]]),
         title: z.string().describe("3-7 words, the point itself. Required."),
         body: z.string().describe("ONE sentence. Required."),
-        confidence: z.number().min(0).max(1),
       }),
     )
     .describe("2-4 cards. Fewer and better beats more."),
@@ -145,7 +144,6 @@ return could sit under a different card on a different map, don't return it.`,
         type: c.type,
         title: c.title,
         body: c.body,
-        confidence: c.confidence,
         connectTo: [target.id],
       }));
 
