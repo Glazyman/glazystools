@@ -101,6 +101,16 @@ Free Credit sat unused while every call 429'd. Cost is negligible: 21 requests =
 $0.01, so a session is ~a cent. If it ever needs cutting further, batch the
 run's audio into one transcribe call at flush (≈40 calls → ≈10).
 
+**update vs create+connect.** Original prompt said update whenever speech
+"adds detail" to an existing card — too broad. It swallowed new points into fat
+cards ("match on GitHub languages" → updated the Tinder card instead of making a
+connected card), which defeats the point of a *graph*. Now: same point restated
+→ `update`; a NEW point that builds on a card (feature / consequence /
+requirement / next step) → `create` + `connectTo` it; new point about nothing on
+the board → `create` with empty `connectTo`. Cards stay small, relationships
+live in the edges. When unsure, leave unconnected — a missing line costs a
+one-second drag, a wrong line has to be spotted first.
+
 **Verified end-to-end:** live mic → transcript → `map` 200 in ~1.15s → card ·
 autosave to Supabase · all 5 card types · edges + labels · board frames on load ·
 no console errors · filler ignored ("I wanna get a" → 0 ops) · batched 3-sentence
