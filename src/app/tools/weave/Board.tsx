@@ -29,12 +29,23 @@ export type BoardProps = {
   flash: Set<string>;
   /** Non-null while hovering a transcript line: only these cards stay lit. */
   spotlight: Set<string> | null;
+  /** Cards with an expand call in flight. */
+  expanding: Set<string>;
   onDoc: (updater: (d: BoardDoc) => BoardDoc) => void;
   /** Snapshot the current doc for undo. Called before each discrete action. */
   onHistory: () => void;
   onSelect: (ids: string[]) => void;
   onCommitCard: (id: string, patch: { title: string; body: string }) => void;
   onCycleType: (id: string) => void;
+  onExpand: (id: string) => void;
+  /** Hands Weave an imperative handle once the canvas is live. */
+  onApi: (api: BoardApi) => void;
+};
+
+/** What Weave needs from the canvas that only React Flow can answer. */
+export type BoardApi = {
+  /** Flow coords at the middle of what you're currently looking at. */
+  viewportCenter: () => { x: number; y: number };
 };
 
 export function Board(props: BoardProps) {
@@ -50,12 +61,16 @@ function Canvas({
   doc,
   flash,
   spotlight,
+  expanding,
   onDoc,
   onHistory,
   onSelect,
   onCommitCard,
   onCycleType,
+  onExpand,
+  onApi,
 }: BoardProps) {
+  const wrapper = useRef<HTMLDivElement>(null);
   // The instance handed over by onInit — not useReactFlow(). The hook's methods
   // come back inert here (a no-op zoomIn/fitView) while the very same actions
   // work by mouse, so we take the instance React Flow hands us once its pan/zoom
@@ -86,18 +101,22 @@ function Canvas({
           flash: flash.has(card.id),
           dimmed: spotlight !== null && !spotlight.has(card.id),
           linkCount: linkCounts.get(card.id) ?? 0,
+          expanding: expanding.has(card.id),
           onCommit: onCommitCard,
           onCycleType,
+          onExpand,
         },
       })),
     [
       doc.cards,
       flash,
       spotlight,
+      expanding,
       linkCounts,
       selectedNodes,
       onCommitCard,
       onCycleType,
+      onExpand,
     ],
   );
 
@@ -216,6 +235,24 @@ function Canvas({
     [onDoc, onHistory],
   );
 
+  // Publish the handle once. A new card must land in the middle of what you're
+  // looking at — appending it to the right edge of the board would drop it
+  // somewhere off-screen and feel like nothing happened.
+  useEffect(() => {
+    onApi({
+      viewportCenter: () => {
+        const el = wrapper.current;
+        const inst = rf.current;
+        if (!el || !inst) return { x: 0, y: 0 };
+        const r = el.getBoundingClientRect();
+        return inst.screenToFlowPosition({
+          x: r.left + r.width / 2,
+          y: r.top + r.height / 2,
+        });
+      },
+    });
+  }, [onApi]);
+
   const zoomInFn = useCallback(() => rf.current?.zoomIn({ duration: 150 }), []);
   const zoomOutFn = useCallback(
     () => rf.current?.zoomOut({ duration: 150 }),
@@ -227,7 +264,7 @@ function Canvas({
   );
 
   return (
-    <div className="relative h-full w-full">
+    <div ref={wrapper} className="relative h-full w-full">
       <ReactFlow
         nodes={nodes}
         edges={edges}

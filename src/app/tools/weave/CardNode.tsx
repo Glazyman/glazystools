@@ -24,14 +24,26 @@ export type CardNodeData = {
   /** Faded because the transcript hover is spotlighting other cards. */
   dimmed: boolean;
   linkCount: number;
+  /** This card is waiting on the expand call. */
+  expanding: boolean;
   onCommit: (id: string, patch: { title: string; body: string }) => void;
   onCycleType: (id: string) => void;
+  onExpand: (id: string) => void;
 };
 
 export type CardNodeType = FlowNode<CardNodeData, "card">;
 
 export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
-  const { card, flash, dimmed, linkCount, onCommit, onCycleType } = data;
+  const {
+    card,
+    flash,
+    dimmed,
+    linkCount,
+    expanding,
+    onCommit,
+    onCycleType,
+    onExpand,
+  } = data;
   // The draft exists only while editing. Keeping no mirrored copy of the card
   // means there's nothing to re-sync when the mapper rewrites this card
   // underneath us — the props stay the single display source.
@@ -96,14 +108,35 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
           >
             {card.type}
           </button>
-          {card.pinned && (
-            <span
-              title="You edited this — the AI won't rewrite it"
-              className="font-mono text-[9px] uppercase tracking-wider text-subtle"
+          <div className="flex items-center gap-2">
+            {card.pinned && (
+              <span
+                title="You edited this — the AI won't rewrite it"
+                className="font-mono text-[9px] uppercase tracking-wider text-subtle"
+              >
+                pinned
+              </span>
+            )}
+            {/* Reveal on hover: this is a deliberate act, not something to
+                fire by accident while dragging cards around. */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onExpand(card.id);
+              }}
+              disabled={expanding}
+              title="Expand — ask the AI for the sub-questions, options, and risks this implies"
+              className={[
+                "nodrag font-mono text-[10px] transition-opacity",
+                expanding
+                  ? "animate-pulse opacity-100"
+                  : "opacity-0 group-hover:opacity-100",
+              ].join(" ")}
+              style={{ color }}
             >
-              pinned
-            </span>
-          )}
+              {expanding ? "···" : "✦"}
+            </button>
+          </div>
         </div>
 
         {draft ? (

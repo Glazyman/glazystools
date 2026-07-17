@@ -8,7 +8,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { tidy } from "@/lib/weave/layout";
+import { CARD_H, CARD_W, freeSpotNear, tidy } from "@/lib/weave/layout";
 import { applyOps } from "@/lib/weave/ops";
 import {
   createBoard,
@@ -23,10 +23,11 @@ import {
   emptyDoc,
   type BoardDoc,
   type BoardMeta,
+  type Card,
   type OpenQuestion,
   type Op,
 } from "@/lib/weave/types";
-import { Board } from "./Board";
+import { Board, type BoardApi } from "./Board";
 import { TranscriptRail } from "./TranscriptRail";
 import { useSpeech } from "./useSpeech";
 import { download, slugify, toMarkdown } from "./export";
@@ -62,6 +63,7 @@ export function Weave() {
   const [interim, setInterim] = useState("");
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [spotlight, setSpotlight] = useState<Set<string> | null>(null);
+  const [expanding, setExpanding] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<string[]>([]);
   const [mapping, setMapping] = useState(0);
   const [consolidating, setConsolidating] = useState(false);
@@ -122,6 +124,7 @@ export function Weave() {
   const pending = useRef<{ id: string; text: string }[]>([]);
   const flushTimer = useRef<number | null>(null);
   const batchStartedAt = useRef(0);
+  const boardApi = useRef<BoardApi | null>(null);
 
   const markDirty = useCallback(() => {
     setSaveState("dirty");
@@ -498,6 +501,90 @@ export function Weave() {
     [pushHistory, updateDoc],
   );
 
+  // Stable, so Board's publish-once effect doesn't re-fire on every render.
+  const handleApi = useCallback((api: BoardApi) => {
+    boardApi.current = api;
+  }, []);
+
+  /** A hand-made card. Born pinned — you wrote it, so the mapper leaves it. */
+  const addCard = useCallback(() => {
+    const c = boardApi.current?.viewportCenter() ?? { x: 0, y: 0 };
+    // Centre of the view, nudged to the nearest gap: dropping it dead-centre
+    // lands it on top of whatever you were already looking at.
+    const at = freeSpotNear(docRef.current, {
+      x: c.x - CARD_W / 2,
+      y: c.y - CARD_H / 2,
+    });
+    const card: Card = {
+      id: crypto.randomUUID(),
+      type: "idea",
+      title: "New card",
+      body: "",
+      confidence: 1,
+      x: at.x,
+      y: at.y,
+      createdAt: Date.now(),
+      sourceUtteranceIds: [],
+      pinned: true,
+    };
+    pushHistory();
+    updateDoc((d) => ({ ...d, cards: [...d.cards, card] }));
+    flashCards([card.id]);
+  }, [flashCards, pushHistory, updateDoc]);
+
+  /** Ask the AI what this card implies but nobody has said yet. */
+  const expandCard = useCallback(
+    async (id: string) => {
+      const boardAtCall = boardIdRef.current;
+      setExpanding((prev) => new Set(prev).add(id));
+      try {
+        const d = docRef.current;
+        const res = await fetch("/api/weave/expand", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cardId: id,
+            cards: d.cards.map((c) => ({
+              id: c.id,
+              type: c.type,
+              title: c.title,
+              body: c.body,
+            })),
+            edges: d.edges.map((e) => ({ source: e.source, target: e.target })),
+          }),
+        });
+        const json = (await res.json()) as {
+          ops?: Op[];
+          summary?: string;
+          error?: string;
+        };
+        if (json.error) throw new Error(json.error);
+        const ops = json.ops ?? [];
+        if (!ops.length) {
+          setNotice("Nothing worth adding there.");
+          return;
+        }
+        if (boardIdRef.current !== boardAtCall) return;
+        pushHistory();
+        const { doc: next, touched } = applyOps(docRef.current, ops);
+        docRef.current = next;
+        setDoc(next);
+        markDirty();
+        flashCards(touched);
+        setNotice(json.summary ?? null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Expand failed.");
+      } finally {
+        setExpanding((prev) => {
+          const n = new Set(prev);
+          n.delete(id);
+          return n;
+        });
+      }
+    },
+    [flashCards, markDirty, pushHistory],
+  );
+
   const answerQuestion = useCallback(
     (q: OpenQuestion) => {
       pushHistory();
@@ -674,6 +761,10 @@ export function Weave() {
           </span>
         )}
 
+        <TB onClick={addCard} title="Add a card by hand">
+          + Card
+        </TB>
+
         <div className="ml-auto flex items-center gap-1.5">
           {selection.length > 0 && (
             <span className="mr-1 font-mono text-[10px] text-subtle">
@@ -807,11 +898,14 @@ export function Weave() {
                 doc={doc}
                 flash={flash}
                 spotlight={spotlight}
+                expanding={expanding}
                 onDoc={updateDoc}
                 onHistory={pushHistory}
                 onSelect={setSelection}
                 onCommitCard={onCommitCard}
                 onCycleType={onCycleType}
+                onExpand={expandCard}
+                onApi={handleApi}
               />
               {doc.cards.length === 0 && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

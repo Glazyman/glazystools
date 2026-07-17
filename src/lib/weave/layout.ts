@@ -44,6 +44,20 @@ function* candidates(from: Point): Generator<Point> {
 }
 
 /**
+ * The nearest free spot to `preferred` that doesn't land on an existing card.
+ * Returns `preferred` itself when it's already clear.
+ */
+export function freeSpotNear(doc: BoardDoc, preferred: Point): Point {
+  for (const p of candidates(preferred)) {
+    if (!overlaps(p, doc.cards)) return p;
+  }
+  // Every ring was full — drop it below the board rather than on top of it.
+  if (doc.cards.length === 0) return preferred;
+  const lowest = doc.cards.reduce((a, b) => (b.y > a.y ? b : a));
+  return { x: preferred.x, y: lowest.y + CARD_H + GAP_Y };
+}
+
+/**
  * Where should a new card go, given the cards it links to?
  * Anchored to its parents when it has them, otherwise appended to the right
  * edge of the board so unrelated threads don't pile up on each other.
@@ -61,12 +75,7 @@ export function placeCard(doc: BoardDoc, anchors: Card[]): Point {
     preferred = { x: rightmost.x + CARD_W + GAP_X, y: rightmost.y };
   }
 
-  for (const p of candidates(preferred)) {
-    if (!overlaps(p, doc.cards)) return p;
-  }
-  // Every ring was full — drop it below the board rather than on top of it.
-  const lowest = doc.cards.reduce((a, b) => (b.y > a.y ? b : a));
-  return { x: preferred.x, y: lowest.y + CARD_H + GAP_Y };
+  return freeSpotNear(doc, preferred);
 }
 
 /**

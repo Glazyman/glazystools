@@ -87,6 +87,25 @@ restatement → still 0; pure filler → still 0. **Lesson: batching trades a
 per-sentence prompt for a per-run one, and the run prompt must be explicit that
 runs are heterogeneous.**
 
+**Expand a node** (`✦` on card hover → `/api/weave/expand`). The mapper only
+reacts to what you said; expand reads ONE card against the whole board and
+surfaces what the map *implies* but nobody has spoken — sub-questions, options,
+risks. 2-4 cards, all `connectTo` the source. `temperature: 0.7` (vs the
+mapper's 0.2 — here we want range, not caution). The prompt's whole job is
+killing generic filler: the test is "could this sentence appear on someone
+else's map?" — if yes it's noise. It works: expanding "build an app to simplify
+patenting" on a board that also held "ship MVP without the API / manual upload"
+produced *"Manual upload vs. 'fast' promise"* — it caught the contradiction
+BETWEEN two cards. That cross-card reasoning is the feature. On a button, never
+automatic: it's the one place Weave has ideas of its own.
+
+**`+ Card`** — manual card at the viewport centre, born `pinned:true` (you wrote
+it, the mapper must not rewrite it). Needs `screenToFlowPosition`, so `Board`
+publishes a `BoardApi` handle via `onApi` (stable useCallback, or its
+publish-once effect re-fires every render). Placement runs through
+`freeSpotNear(doc, point)` — extracted out of `placeCard` — because dead-centre
+drops it on top of whatever you were looking at.
+
 **Batched mapping (not per-sentence).** Utterances buffer in `pending` and flush
 as ONE call after `PAUSE_MS` 1500ms of silence (or `MAX_BATCH` 6 / `MAX_WAIT_MS`
 12s, so a monologue can't bank up forever). This started as a rate-limit dodge
