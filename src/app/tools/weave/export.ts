@@ -8,7 +8,16 @@ export function toMarkdown(title: string, doc: BoardDoc): string {
   const out: string[] = [`# ${title}`, ""];
   const byId = new Map(doc.cards.map((c) => [c.id, c]));
 
-  for (const type of CARD_TYPES) {
+  // Types are free-form now, so the section list comes from the board itself:
+  // the five workhorses first (stable, familiar order), then whatever custom
+  // types the model coined, in first-appearance order. Iterating CARD_TYPES
+  // alone silently dropped every custom-typed card from the export.
+  const seen = new Set(CARD_TYPES);
+  const custom = doc.cards
+    .map((c) => c.type)
+    .filter((t) => !seen.has(t) && (seen.add(t), true));
+
+  for (const type of [...CARD_TYPES, ...custom]) {
     const cards = doc.cards.filter((c) => c.type === type);
     if (!cards.length) continue;
     out.push(`## ${type[0].toUpperCase()}${type.slice(1)}s`, "");

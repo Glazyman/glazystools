@@ -21,6 +21,25 @@ export async function listBoards(): Promise<BoardMeta[]> {
   return (data ?? []) as BoardMeta[];
 }
 
+/**
+ * Every board WITH its cards, for cross-board search. One query on purpose:
+ * this is a personal tool with tens of boards, and one round-trip that
+ * over-fetches beats N sequential ones every time the palette opens.
+ */
+export async function allBoards(): Promise<Board[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return ((data ?? []) as Board[]).map((row) => ({
+    ...row,
+    doc: { ...emptyDoc(), ...row.doc },
+  }));
+}
+
 export async function createBoard(title = "Untitled board"): Promise<BoardMeta> {
   const supabase = createClient();
   const { data, error } = await supabase

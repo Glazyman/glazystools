@@ -8,11 +8,14 @@
 
 import { generateObject } from "ai";
 import { z } from "zod";
-import { CARD_TYPES, type CardType, type Op } from "@/lib/weave/types";
+import { normalizeType, type Op } from "@/lib/weave/types";
 import { costOf } from "@/lib/weave/cost";
 
 export const maxDuration = 120;
 
+// Deliberately NOT thinking-disabled the way the map route is: this pass runs
+// once, after you stop talking, and is allowed to actually reason about the
+// whole board. Speed matters per-utterance; judgment matters here.
 const MODEL = process.env.WEAVE_CONSOLIDATE_MODEL ?? "google/gemini-2.5-flash";
 
 // One array per operation kind, every field required — same shape as the map
@@ -20,7 +23,11 @@ const MODEL = process.env.WEAVE_CONSOLIDATE_MODEL ?? "google/gemini-2.5-flash";
 // all-optional fields the model emits {op:"update_card", id:"..."} and omits
 // the title entirely, which then silently does nothing. Required fields make
 // that a schema violation the model must retry instead.
-const TypeEnum = z.enum(CARD_TYPES as [CardType, ...CardType[]]);
+const TypeEnum = z
+  .string()
+  .describe(
+    'What the card IS, one short lowercase word: idea / action / question / fact / decision when they fit, or the truer word ("risk", "goal", "metric", "constraint") when they don\'t.',
+  );
 
 const ResultSchema = z.object({
   summary: z
@@ -44,6 +51,28 @@ const ResultSchema = z.object({
         .describe('Why: "duplicate of X" or "junk". Forces you to justify it.'),
     }),
   ),
+  split: z.array(
+    z.object({
+      id: z.string().describe("The overloaded card being split."),
+      keepType: TypeEnum,
+      keepTitle: z
+        .string()
+        .describe("The original card's new title: its PRIMARY point only."),
+      keepBody: z
+        .string()
+        .describe("The original card's new body, narrowed to that one point."),
+      parts: z
+        .array(
+          z.object({
+            ref: z.string().describe('Short handle you invent, e.g. "s1".'),
+            type: TypeEnum,
+            title: z.string().describe("3-7 words. The point itself."),
+            body: z.string().describe("ONE sentence of detail."),
+          }),
+        )
+        .describe("The OTHER points that were buried in the card. 1-3 of them."),
+    }),
+  ),
   link: z.array(
     z.object({
       source: z.string(),
@@ -63,8 +92,9 @@ const ResultSchema = z.object({
 const SYSTEM = `You clean up a thought-map that was built live while someone
 talked. You see the entire board at once — the first time anything has.
 
-You cannot create cards. This is a cleanup pass, not a generation pass. Nothing
-that isn't already on the board belongs on it.
+You cannot invent content. The ONLY way you may create a card is by SPLITTING
+one that already exists — redistributing points the speaker actually said.
+Nothing that isn't already on the board belongs on it.
 
 ## Prefer doing nothing
 
@@ -83,7 +113,10 @@ is the main thing you are here for; people restate themselves constantly when
 thinking aloud. Merge by updating the survivor to the better title/body, then
 delete_card the other. Keep the card that is better connected, or older if it's
 a wash. Two cards on the same TOPIC are not duplicates — only merge when one
-card makes the other redundant.
+card makes the other redundant. And a merge must never FATTEN the survivor: if
+the duplicate also carried a point the survivor lacks, that point comes out as
+a split part, not as an extra clause in the survivor's body. Cards stay small;
+structure lives in the edges.
 
 Sloppy titles — a title that is a fragment, a filler phrase, or a description of
 a point rather than the point itself. Rewrite it to 3-7 words that state the
@@ -97,16 +130,35 @@ than a missing one.
 Junk — a card that is filler, an abandoned half-thought, or says nothing. Delete
 it. Be strict about what counts: if it carries any real content, it stays.
 
+Overloaded cards — ONE card carrying TWO OR MORE distinct points: an idea and
+its main risk, a decision and the action it demands, three features crammed
+into one body. Split it: the card keeps its PRIMARY point (narrowed title and
+body), and each buried point becomes its own card, automatically connected back
+to the original. A card whose body merely elaborates its title in a couple of
+clauses is NOT overloaded — split only when a reader would say "that's two
+different things on one card".
+
+Wrong types — a card typed "fact" that is plainly a risk, an "idea" that is
+plainly a goal. Types are free-form: idea / action / question / fact / decision
+are the workhorses, but the truer one-word name ("risk", "goal", "metric",
+"constraint") is better when a card genuinely is one. Retype only when the
+current type is wrong, not merely improvable.
+
 ## Operations
 
-You return five lists: update, remove, link, unlink, ask. Any may be empty and
-usually all are. Only ever reference ids that appear on the board above.
+You return six lists: update, remove, split, link, unlink, ask. Any may be
+empty and usually all are. Only ever reference ids that appear on the board
+above.
 
 update — restate the card's FULL new state: { id, type, title, body }.
   You can see the card; carry over verbatim whatever you aren't changing. Never
   leave title or body empty.
 remove — { id, reason } a duplicate you merged away, or genuine junk. The reason
   is required: if you can't name it ("duplicate of card-x", "junk"), don't remove it.
+split — { id, keepType, keepTitle, keepBody, parts } one overloaded card →
+  several. keep* is the original card narrowed to its primary point; each part
+  is one buried point, and each gets connected back to the original for you.
+  Never split a pinned card.
 link — { source, target, label } a real relationship that was missed. label "" if none.
 unlink — { source, target } an edge that is plainly wrong.
 ask — { text, cardId } at most one, only if the whole board hinges on it.
@@ -189,12 +241,36 @@ answer.`,
  */
 function flatten(o: z.infer<typeof ResultSchema>): Op[] {
   const ops: Op[] = [];
+  // Splits first: narrow the original, then hang each buried point off it.
+  // A split with no usable parts is refused outright — otherwise it would
+  // rewrite the card while adding nothing, which is just an unasked-for edit.
+  for (const s of o.split) {
+    const parts = s.parts.filter((p) => p.title.trim());
+    if (!s.id || !s.keepTitle.trim() || !parts.length) continue;
+    ops.push({
+      op: "update_card",
+      id: s.id,
+      type: normalizeType(s.keepType),
+      title: s.keepTitle,
+      body: s.keepBody,
+    });
+    for (const p of parts) {
+      ops.push({
+        op: "create_card",
+        ref: p.ref,
+        type: normalizeType(p.type),
+        title: p.title,
+        body: p.body,
+        connectTo: [s.id],
+      });
+    }
+  }
   for (const u of o.update) {
     if (!u.id || !u.title.trim()) continue;
     ops.push({
       op: "update_card",
       id: u.id,
-      type: u.type,
+      type: normalizeType(u.type),
       title: u.title,
       body: u.body,
     });

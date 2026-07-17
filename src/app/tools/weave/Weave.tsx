@@ -33,6 +33,7 @@ import { CardMenu, type CardMenuState } from "./CardMenu";
 import { Lightbox, type LightboxState } from "./Lightbox";
 import { deleteAttachment, uploadAttachment } from "@/lib/weave/attachments";
 import { TranscriptRail } from "./TranscriptRail";
+import { BoardSearch, type SearchHit } from "./BoardSearch";
 import { useSpeech } from "./useSpeech";
 import { download, slugify, toMarkdown } from "./export";
 import "./weave.css";
@@ -85,8 +86,12 @@ function keyLabel(code: string): string {
 // Buffering until you pause hands it the whole thought at once — and cuts calls
 // by 3-5x, which is the difference between working and rate-limited.
 
-/** Silence that ends a run of speech. Long enough to survive a breath. */
-const PAUSE_MS = 1500;
+/** Silence that ends a run of speech. Long enough to survive a breath — but
+ *  every ms here sits between the speaker pausing and the card appearing, so
+ *  it stays as short as run-grouping allows. Utterances that belong to one
+ *  run finalise close together; their settles land within this window even
+ *  with the accuracy pass's jitter (~1s ± 0.5s). */
+const PAUSE_MS = 900;
 /** Flush early rather than let an uninterrupted monologue bank up forever. */
 const MAX_BATCH = 6;
 const MAX_WAIT_MS = 12000;
@@ -112,6 +117,19 @@ export function Weave() {
   const [consolidating, setConsolidating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** What the last review changed, plus the board as it was — the veto. */
+  const [reviewDigest, setReviewDigest] = useState<{
+    summary: string;
+    before: BoardDoc;
+  } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  /** Deletions the speaker asked for out loud, awaiting the hand that
+   *  confirms them. A misheard "delete that" must never cost a card. */
+  const [confirmDeletes, setConfirmDeletes] = useState<{
+    boardId: string | null;
+    ops: Op[];
+    titles: string[];
+  } | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -180,6 +198,24 @@ export function Weave() {
   const pending = useRef<{ id: string; text: string }[]>([]);
   const flushTimer = useRef<number | null>(null);
   const batchStartedAt = useRef(0);
+
+  // The auto-review that fires when you stop talking needs live values inside
+  // an async wait loop, where React state would be a stale snapshot.
+  /** Mirrors `mapping` — how many map calls are in flight. */
+  const mappingRef = useRef(0);
+  /** Mirrors `speech.settling` — accuracy passes still in flight. */
+  const settlingRef = useRef(false);
+  /** Anything actually said since listening started? No speech, no review. */
+  const spokeRef = useRef(false);
+
+  // Voice targeting: what your speech is aimed at.
+  /** Card selected when listening started — this session speaks AT it. */
+  const focusCardRef = useRef<string | null>(null);
+  /** A transcript line being re-spoken. `captured` flips on its first final,
+   *  so a stray second final can't hijack the replacement. */
+  const redictateRef = useRef<{ id: string; captured: boolean } | null>(null);
+  /** Mirrors `selection` for the moment the talk key fires. */
+  const selectionRef = useRef<string[]>([]);
   const boardApi = useRef<BoardApi | null>(null);
 
   const markDirty = useCallback(() => {
@@ -375,6 +411,7 @@ export function Weave() {
     async (
       batch: { id: string; text: string }[],
       correcting?: { id: string; title: string; body: string }[],
+      focusCardId?: string,
     ) => {
       if (!batch.length) return;
       // A response can land after you've switched boards; applying it then
@@ -383,6 +420,7 @@ export function Weave() {
       const ids = batch.map((b) => b.id);
       const text = batch.map((b) => b.text).join(" ");
       const d = docRef.current;
+      mappingRef.current += 1;
       setMapping((m) => m + 1);
       try {
         const res = await fetch("/api/weave/map", {
@@ -390,6 +428,7 @@ export function Weave() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             utterance: text,
+            focusCardId,
             correcting,
             recent: d.utterances
               .filter((u) => !ids.includes(u.id))
@@ -412,12 +451,45 @@ export function Weave() {
         };
         if (json.error) throw new Error(json.error);
         addSpend(json.cost);
-        const ops = json.ops ?? [];
+        let ops = json.ops ?? [];
         if (!ops.length) return; // Filler. The overwhelmingly common case.
         if (boardIdRef.current !== boardAtCall) return;
 
+        // Spoken deletions don't land on their own — they wait for the
+        // confirm banner. Everything else in the batch applies as normal.
+        const spokenDeletes = ops.filter((o) => o.op === "delete_card");
+        if (spokenDeletes.length) {
+          ops = ops.filter((o) => o.op !== "delete_card");
+          const titles = spokenDeletes
+            .map((o) =>
+              o.op === "delete_card"
+                ? docRef.current.cards.find((c) => c.id === o.id)?.title
+                : undefined,
+            )
+            .filter((t): t is string => Boolean(t));
+          if (titles.length) {
+            setConfirmDeletes({
+              boardId: boardAtCall,
+              ops: spokenDeletes,
+              titles,
+            });
+          }
+        }
+        if (!ops.length) return;
+
         pushHistory();
-        const { doc: next, touched } = applyOps(docRef.current, ops, ids);
+        // Speaking AT a pinned card is the user editing their own card — the
+        // pin guards against unaimed rewrites, not this. applyOps would
+        // silently refuse the update otherwise, so lift it first.
+        const base = focusCardId
+          ? {
+              ...docRef.current,
+              cards: docRef.current.cards.map((c) =>
+                c.id === focusCardId && c.pinned ? { ...c, pinned: false } : c,
+              ),
+            }
+          : docRef.current;
+        const { doc: next, touched } = applyOps(base, ops, ids);
         docRef.current = next;
         setDoc(next);
         markDirty();
@@ -425,6 +497,7 @@ export function Weave() {
       } catch (e) {
         setError(e instanceof Error ? e.message : "Mapping failed.");
       } finally {
+        mappingRef.current -= 1;
         setMapping((m) => m - 1);
       }
     },
@@ -439,7 +512,9 @@ export function Weave() {
     const batch = pending.current;
     pending.current = [];
     batchStartedAt.current = 0;
-    void mapBatch(batch);
+    // Read the focus at flush time, not per-utterance: settles trail the mic
+    // stopping, and the target holds until the whole session's speech lands.
+    void mapBatch(batch, undefined, focusCardRef.current ?? undefined);
   }, [mapBatch]);
 
   const queue = useCallback(
@@ -551,6 +626,24 @@ export function Weave() {
   const speech = useSpeech({
     onInterim: setInterim,
     onFinal: (text) => {
+      // Re-dictating one transcript line: the first final IS the replacement.
+      // The line keeps its id, so the settle pass flows back to it, and the
+      // mic stops itself — you re-say the line, not start a session.
+      const redo = redictateRef.current;
+      if (redo) {
+        setInterim("");
+        if (redo.captured) return ""; // a stray extra final; not tracked
+        redo.captured = true;
+        updateDoc((d) => ({
+          ...d,
+          utterances: d.utterances.map((u) =>
+            u.id === redo.id ? { ...u, status: "refining" } : u,
+          ),
+        }));
+        setTimeout(() => stopRef.current(), 0); // not from inside onresult
+        return redo.id;
+      }
+      spokeRef.current = true;
       const id = crypto.randomUUID();
       updateDoc((d) => ({
         ...d,
@@ -563,6 +656,20 @@ export function Weave() {
       return id;
     },
     onSettled: (id, text, improved) => {
+      // The replacement for a re-spoken line goes through the correction
+      // machinery — rewind what the old text did, then re-map — not through
+      // the normal append-and-queue path.
+      if (redictateRef.current?.id === id) {
+        redictateRef.current = null;
+        updateDoc((d) => ({
+          ...d,
+          utterances: d.utterances.map((u) =>
+            u.id === id ? { ...u, status: improved ? "refined" : "final" } : u,
+          ),
+        }));
+        editUtterance(id, text);
+        return;
+      }
       updateDoc((d) => ({
         ...d,
         utterances: d.utterances.map((u) =>
@@ -578,23 +685,46 @@ export function Weave() {
     onCost: addSpend,
   });
 
+  /** Re-say one transcript line: the next thing spoken replaces it, and its
+   *  cards get fixed through the same machinery as a typed correction. */
+  const startSpeech = speech.start;
+  const redictateUtterance = useCallback(
+    (id: string) => {
+      redictateRef.current = { id, captured: false };
+      setNotice("Listening — say that line again.");
+      startSpeech();
+    },
+    [startSpeech],
+  );
+
   // ── Hotkeys ─────────────────────────────────────────────────────────────
 
   // Latest-ref pattern: the keydown listener binds once and must never see a
   // stale closure, but rebinding it on every render would be wasteful churn.
   const toggleRef = useRef(speech.toggle);
+  const stopRef = useRef(speech.stop);
   const undoRef = useRef(undo);
   const redoRef = useRef(redo);
   const talkKeyRef = useRef(talkKey);
   useEffect(() => {
     toggleRef.current = speech.toggle;
+    stopRef.current = speech.stop;
     undoRef.current = undo;
     redoRef.current = redo;
     talkKeyRef.current = talkKey;
+    selectionRef.current = selection;
   });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // ⌘K opens search from anywhere, including mid-typing — that's the
+      // palette convention, and it's chorded so it can't collide with text.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+        return;
+      }
+
       const t = e.target as HTMLElement | null;
       const typing =
         !!t &&
@@ -628,6 +758,17 @@ export function Weave() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  /** Which transcript lines made the selected card(s) — the rail lights them
+   *  up, so clicking a card answers "what did I say to get this". */
+  const railHighlight = useMemo(() => {
+    if (!selection.length) return null;
+    const picked = new Set(selection);
+    const ids = doc.utterances
+      .filter((u) => u.cardIds.some((c) => picked.has(c)))
+      .map((u) => u.id);
+    return ids.length ? new Set(ids) : null;
+  }, [selection, doc.utterances]);
 
   /** Sub-tenth-of-a-cent is true but useless; say so rather than show $0.000. */
   const spendLabel = useMemo(() => {
@@ -888,6 +1029,261 @@ export function Weave() {
     [addSpend, flashCards, markDirty, pushHistory],
   );
 
+  /** One overloaded card → its distinct points, connected. */
+  const splitCard = useCallback(
+    async (id: string) => {
+      const boardAtCall = boardIdRef.current;
+      // Reuses the expand spinner: the card pulses "Thinking…" while the AI
+      // works, which is exactly what's happening.
+      setExpanding((prev) => new Set(prev).add(id));
+      try {
+        const d = docRef.current;
+        const res = await fetch("/api/weave/split", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cardId: id,
+            cards: d.cards.map((c) => ({
+              id: c.id,
+              type: c.type,
+              title: c.title,
+              body: c.body,
+            })),
+            edges: d.edges.map((e) => ({ source: e.source, target: e.target })),
+          }),
+        });
+        const json = (await res.json()) as {
+          ops?: Op[];
+          summary?: string;
+          cost?: number;
+          error?: string;
+        };
+        if (json.error) throw new Error(json.error);
+        addSpend(json.cost);
+        const ops = json.ops ?? [];
+        if (!ops.length) {
+          setNotice(json.summary ?? "That card is already a single point.");
+          return;
+        }
+        if (boardIdRef.current !== boardAtCall) return;
+        pushHistory();
+        // Splitting rewrites the original by definition, and the user asked
+        // for it by hand — so a pin (which exists to stop the MAPPER rewriting
+        // your words) must not block it. Unpin, then apply.
+        const unpinned = {
+          ...docRef.current,
+          cards: docRef.current.cards.map((c) =>
+            c.id === id && c.pinned ? { ...c, pinned: false } : c,
+          ),
+        };
+        const { doc: next, touched } = applyOps(unpinned, ops);
+        docRef.current = next;
+        setDoc(next);
+        markDirty();
+        flashCards(touched);
+        setNotice(json.summary ?? null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Split failed.");
+      } finally {
+        setExpanding((prev) => {
+          const n = new Set(prev);
+          n.delete(id);
+          return n;
+        });
+      }
+    },
+    [addSpend, flashCards, markDirty, pushHistory],
+  );
+
+  /**
+   * The exit door: selected cards → one paste-ready build prompt, landed as a
+   * pinned card (pinned so neither the mapper nor the review pass rewrites a
+   * deliverable) and copied to the clipboard.
+   */
+  const buildPrompt = useCallback(
+    async (cardId: string) => {
+      const boardAtCall = boardIdRef.current;
+      const d = docRef.current;
+      // Right-clicking inside your selection means "from these"; right-clicking
+      // an unselected card means "from this one".
+      const sel = selectionRef.current;
+      const ids = sel.length > 1 && sel.includes(cardId) ? sel : [cardId];
+      const chosen = d.cards.filter((c) => ids.includes(c.id));
+      if (!chosen.length) return;
+
+      setExpanding((prev) => new Set(prev).add(cardId));
+      try {
+        const res = await fetch("/api/weave/prompt", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cards: chosen.map((c) => ({
+              id: c.id,
+              type: c.type,
+              title: c.title,
+              body: c.body,
+            })),
+            // Only edges within the selection — context outside it wasn't chosen.
+            edges: d.edges
+              .filter((e) => ids.includes(e.source) && ids.includes(e.target))
+              .map((e) => ({ source: e.source, target: e.target, label: e.label })),
+          }),
+        });
+        const json = (await res.json()) as {
+          title?: string;
+          prompt?: string;
+          cost?: number;
+          error?: string;
+        };
+        if (json.error) throw new Error(json.error);
+        addSpend(json.cost);
+        const prompt = (json.prompt ?? "").trim();
+        if (!prompt) throw new Error("The prompt came back empty.");
+        if (boardIdRef.current !== boardAtCall) return;
+
+        const src = docRef.current.cards.find((c) => c.id === cardId);
+        const at = freeSpotNear(docRef.current, {
+          x: (src?.x ?? 0) + CARD_W + 60,
+          y: src?.y ?? 0,
+        });
+        const card: Card = {
+          id: crypto.randomUUID(),
+          type: "prompt",
+          title: json.title?.trim() || "Build prompt",
+          body: prompt,
+          x: at.x,
+          y: at.y,
+          createdAt: Date.now(),
+          sourceUtteranceIds: [],
+          pinned: true,
+          // Lineage: so "Regenerate" can re-read these cards as they are then.
+          promptSources: ids,
+        };
+        pushHistory();
+        updateDoc((dd) => ({ ...dd, cards: [...dd.cards, card] }));
+        flashCards([card.id]);
+
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(prompt);
+          copied = true;
+        } catch {
+          // Clipboard needs focus/permission; the card still has the text.
+        }
+        setNotice(
+          copied
+            ? "Build prompt card created — and copied to your clipboard."
+            : "Build prompt card created. Double-click it to copy the text.",
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Prompt failed.");
+      } finally {
+        setExpanding((prev) => {
+          const n = new Set(prev);
+          n.delete(cardId);
+          return n;
+        });
+      }
+    },
+    [addSpend, flashCards, pushHistory, updateDoc],
+  );
+
+  /**
+   * A prompt card is a snapshot; the idea keeps moving after it's taken.
+   * Regenerate re-reads the SOURCE cards as they are NOW and rewrites the
+   * prompt in place — same card, same position, fresh deliverable.
+   */
+  const regeneratePrompt = useCallback(
+    async (id: string) => {
+      const boardAtCall = boardIdRef.current;
+      const d = docRef.current;
+      const promptCard = d.cards.find((c) => c.id === id);
+      if (!promptCard) return;
+      const wanted = new Set(promptCard.promptSources ?? []);
+      const sources = d.cards.filter((c) => wanted.has(c.id));
+      if (!sources.length) {
+        setError("None of this prompt's source cards are still on the board.");
+        return;
+      }
+      setExpanding((prev) => new Set(prev).add(id));
+      try {
+        const srcIds = sources.map((c) => c.id);
+        const res = await fetch("/api/weave/prompt", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cards: sources.map((c) => ({
+              id: c.id,
+              type: c.type,
+              title: c.title,
+              body: c.body,
+            })),
+            edges: d.edges
+              .filter(
+                (e) => srcIds.includes(e.source) && srcIds.includes(e.target),
+              )
+              .map((e) => ({ source: e.source, target: e.target, label: e.label })),
+          }),
+        });
+        const json = (await res.json()) as {
+          title?: string;
+          prompt?: string;
+          cost?: number;
+          error?: string;
+        };
+        if (json.error) throw new Error(json.error);
+        addSpend(json.cost);
+        const prompt = (json.prompt ?? "").trim();
+        if (!prompt) throw new Error("The prompt came back empty.");
+        if (boardIdRef.current !== boardAtCall) return;
+
+        pushHistory();
+        updateDoc((dd) => ({
+          ...dd,
+          cards: dd.cards.map((c) =>
+            c.id === id
+              ? { ...c, title: json.title?.trim() || c.title, body: prompt }
+              : c,
+          ),
+        }));
+        flashCards([id]);
+
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(prompt);
+          copied = true;
+        } catch {
+          // Clipboard needs focus/permission; the card still has the text.
+        }
+        setNotice(
+          copied
+            ? `Prompt regenerated from ${sources.length} card${sources.length > 1 ? "s" : ""} — copied to your clipboard.`
+            : `Prompt regenerated from ${sources.length} card${sources.length > 1 ? "s" : ""}.`,
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Regenerate failed.");
+      } finally {
+        setExpanding((prev) => {
+          const n = new Set(prev);
+          n.delete(id);
+          return n;
+        });
+      }
+    },
+    [addSpend, flashCards, pushHistory, updateDoc],
+  );
+
+  /** Prompt card → .md on disk, ready to drop into a repo or a build tool. */
+  const downloadCardMd = useCallback((id: string) => {
+    const card = docRef.current.cards.find((c) => c.id === id);
+    if (!card) return;
+    download(
+      `${slugify(card.title)}.md`,
+      `# ${card.title}\n\n${card.body}\n`,
+      "text/markdown",
+    );
+  }, []);
+
   const answerQuestion = useCallback(
     (q: OpenQuestion) => {
       pushHistory();
@@ -920,10 +1316,12 @@ export function Weave() {
   // ── Board actions ───────────────────────────────────────────────────────
 
   const consolidate = async () => {
-    if (doc.cards.length < 2) {
+    if (consolidating) return; // one review at a time — auto + click can race
+    if (docRef.current.cards.length < 2) {
       setNotice("Not enough on the board to consolidate yet.");
       return;
     }
+    const boardAtCall = boardIdRef.current;
     setConsolidating(true);
     try {
       const d = docRef.current;
@@ -949,22 +1347,151 @@ export function Weave() {
       };
       if (json.error) throw new Error(json.error);
       addSpend(json.cost);
+      // A slow response can land after a board switch; these ops belong to
+      // the board they were computed from, not whatever is open now.
+      if (boardIdRef.current !== boardAtCall) return;
       const ops = json.ops ?? [];
       if (ops.length) {
+        const before = docRef.current;
         pushHistory();
-        const { doc: next, touched } = applyOps(docRef.current, ops);
+        const { doc: next, touched } = applyOps(before, ops);
         docRef.current = next;
         setDoc(next);
         markDirty();
         flashCards(touched);
+        // The digest, not a notice: the review edited the board on its own,
+        // so it owes you what it did — and a way to say no.
+        setReviewDigest({
+          summary: json.summary ?? "Board reviewed.",
+          before,
+        });
+      } else {
+        setNotice(json.summary ?? "Nothing needed changing.");
       }
-      setNotice(json.summary ?? "Nothing needed changing.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Consolidate failed.");
     } finally {
       setConsolidating(false);
     }
   };
+
+  /** The hand that lands a spoken deletion. */
+  const applySpokenDeletes = useCallback(() => {
+    if (!confirmDeletes) return;
+    setConfirmDeletes(null);
+    // The board may have changed hands since the words were said.
+    if (boardIdRef.current !== confirmDeletes.boardId) return;
+    pushHistory();
+    const { doc: next } = applyOps(docRef.current, confirmDeletes.ops);
+    docRef.current = next;
+    setDoc(next);
+    markDirty();
+    setNotice(
+      `Deleted ${confirmDeletes.titles.map((t) => `“${t}”`).join(", ")}.`,
+    );
+  }, [confirmDeletes, markDirty, pushHistory]);
+
+  /** The veto: put the board back exactly as it was before the review.
+   *  A snapshot restore rather than an undo-stack pop, so edits you made
+   *  AFTER the review can't get caught in the blast radius. */
+  const vetoReview = useCallback(() => {
+    if (!reviewDigest) return;
+    pushHistory(); // ⌘⇧Z can bring the review's version back
+    docRef.current = reviewDigest.before;
+    setDoc(reviewDigest.before);
+    markDirty();
+    setReviewDigest(null);
+    setNotice("Review undone.");
+  }, [reviewDigest, markDirty, pushHistory]);
+
+  // A digest that sits forever becomes chrome; one that vanishes in four
+  // seconds can't be read. Twenty is long enough to glance and decide.
+  useEffect(() => {
+    if (!reviewDigest) return;
+    const t = setTimeout(() => setReviewDigest(null), 20_000);
+    return () => clearTimeout(t);
+  }, [reviewDigest]);
+
+  // ── The end-of-session review ───────────────────────────────────────────
+  //
+  // Stopping the mic is the "I'm done" signal. The per-utterance mapper is
+  // deliberately fast and shallow (thinking disabled); this is where the slow
+  // brain runs — once the pipeline drains, the consolidate pass reads the
+  // whole board with reasoning on and fixes what the fast passes got wrong:
+  // duplicates, wrong update-vs-create calls, overloaded cards, missed edges.
+  // Same latest-ref pattern as the hotkeys: written in an effect (never during
+  // render), no dep array so it resyncs after every render.
+  const consolidateRef = useRef(consolidate);
+  useEffect(() => {
+    consolidateRef.current = consolidate;
+    settlingRef.current = speech.settling;
+  });
+  const prevSpeechState = useRef(speech.state);
+  useEffect(() => {
+    const was = prevSpeechState.current;
+    prevSpeechState.current = speech.state;
+
+    // Session start: aim the session. A single selected card becomes the
+    // target every spoken run maps AT; a re-dictation (already aimed at a
+    // transcript line) takes precedence over whatever happens to be selected.
+    if (speech.state === "listening" && was !== "listening") {
+      spokeRef.current = false;
+      if (!redictateRef.current && selectionRef.current.length === 1) {
+        const target = selectionRef.current[0];
+        focusCardRef.current = target;
+        const card = docRef.current.cards.find((c) => c.id === target);
+        if (card) setNotice(`Speaking to “${card.title}” — say what should change.`);
+      } else {
+        focusCardRef.current = null;
+      }
+      return;
+    }
+
+    if (was !== "listening" || speech.state !== "idle") return;
+    // Stopping before the replacement was spoken cancels the re-dictation.
+    if (redictateRef.current && !redictateRef.current.captured) {
+      redictateRef.current = null;
+    }
+    if (!spokeRef.current) {
+      focusCardRef.current = null;
+      return; // mic opened and closed without a word
+    }
+    spokeRef.current = false;
+    const boardAtStop = boardIdRef.current;
+    void (async () => {
+      // Let the tail of the pipeline land first — accuracy passes, the
+      // batching debounce, map calls — bounded so one wedged request can't
+      // hold the review hostage forever.
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        if (
+          !settlingRef.current &&
+          mappingRef.current === 0 &&
+          pending.current.length === 0 &&
+          flushTimer.current === null
+        ) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (boardIdRef.current !== boardAtStop) return;
+      // The target held through the trailing settles/maps; release it before
+      // the review so the next session starts unaimed.
+      focusCardRef.current = null;
+      void consolidateRef.current();
+    })();
+  }, [speech.state]);
+
+  // ── Cross-board search ──────────────────────────────────────────────────
+
+  const jumpToHit = useCallback(
+    async (hit: SearchHit) => {
+      setSearchOpen(false);
+      if (boardIdRef.current !== hit.boardId) await openBoard(hit.boardId);
+      if (hit.cardId) flashCards([hit.cardId]);
+    },
+    [flashCards, openBoard],
+  );
 
   const doTidy = () => {
     if (!doc.cards.length) return;
@@ -1105,6 +1632,9 @@ export function Weave() {
           >
             ↻
           </button>
+          <TB onClick={() => setSearchOpen(true)} title="Search every board (⌘K)">
+            ⌕ Search
+          </TB>
           <TB onClick={doTidy} disabled={!doc.cards.length} title="Tidy layout">
             Tidy
           </TB>
@@ -1165,12 +1695,42 @@ export function Weave() {
           {notice}
         </Banner>
       )}
+      {reviewDigest && (
+        <Banner tone="wip" onDismiss={() => setReviewDigest(null)}>
+          ✦ Review: {reviewDigest.summary}{" "}
+          <button
+            onClick={vetoReview}
+            className="ml-2 rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-opacity hover:opacity-70"
+          >
+            Undo
+          </button>
+        </Banner>
+      )}
+      {confirmDeletes && (
+        <Banner tone="accent-2" onDismiss={() => setConfirmDeletes(null)}>
+          You asked to delete{" "}
+          {confirmDeletes.titles.map((t) => `“${t}”`).join(", ")} — sure?{" "}
+          <button
+            onClick={applySpokenDeletes}
+            className="ml-2 rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-opacity hover:opacity-70"
+          >
+            Delete
+          </button>{" "}
+          <button
+            onClick={() => setConfirmDeletes(null)}
+            className="ml-1 rounded border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-subtle transition-colors hover:text-fg"
+          >
+            Keep
+          </button>
+        </Banner>
+      )}
 
       {/* Rail + canvas */}
       <div className="flex min-h-0 flex-1">
         {railOpen && (
           <TranscriptRail
             utterances={doc.utterances}
+            highlight={railHighlight}
             interim={interim}
             questions={doc.questions}
             listening={listening}
@@ -1179,6 +1739,7 @@ export function Weave() {
             onSpotlight={(ids) => setSpotlight(ids ? new Set(ids) : null)}
             onSubmitText={addTyped}
             onEditUtterance={editUtterance}
+            onRedictate={redictateUtterance}
             onDismissQuestion={(id) =>
               updateDoc((d) => ({
                 ...d,
@@ -1243,11 +1804,24 @@ export function Weave() {
         />
       )}
 
+      {searchOpen && (
+        <BoardSearch
+          onClose={() => setSearchOpen(false)}
+          onJump={(hit) => void jumpToHit(hit)}
+        />
+      )}
       {menu && (
         <CardMenu
           state={menu}
           onClose={() => setMenu(null)}
+          selectionCount={
+            selection.includes(menu.card.id) ? selection.length : 1
+          }
           onDuplicate={duplicateCard}
+          onSplit={splitCard}
+          onBuildPrompt={buildPrompt}
+          onDownloadMd={downloadCardMd}
+          onRegenerate={regeneratePrompt}
           onSetType={setCardType}
           onAttach={askForFile}
           onDelete={deleteCard}

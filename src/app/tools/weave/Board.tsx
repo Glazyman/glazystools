@@ -9,6 +9,7 @@ import {
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   getBezierPath,
   useNodesState,
   type Connection,
@@ -417,7 +418,14 @@ function Canvas({
         fitView
         fitViewOptions={{ padding: 0.25 }}
         deleteKeyCode={["Backspace", "Delete"]}
-        multiSelectionKeyCode={["Meta", "Shift"]}
+        // Shift+drag draws a selection box (partial overlap counts) instead of
+        // panning; plain drag still pans. Shift had to move OFF
+        // multiSelectionKeyCode for that — while it was there, React Flow
+        // treated Shift as "add to selection" and swallowed the box gesture.
+        // ⌘-click still accumulates a selection card by card.
+        selectionKeyCode="Shift"
+        selectionMode={SelectionMode.Partial}
+        multiSelectionKeyCode="Meta"
         minZoom={0.15}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}

@@ -8,7 +8,7 @@
 
 import { generateObject } from "ai";
 import { z } from "zod";
-import { CARD_TYPES, type CardType, type Op } from "@/lib/weave/types";
+import { normalizeType, type Op } from "@/lib/weave/types";
 import { costOf } from "@/lib/weave/cost";
 
 export const maxDuration = 60;
@@ -23,7 +23,11 @@ const ResultSchema = z.object({
     .array(
       z.object({
         ref: z.string().describe('Short handle, e.g. "e1"'),
-        type: z.enum(CARD_TYPES as [CardType, ...CardType[]]),
+        type: z
+          .string()
+          .describe(
+            'One short lowercase word: action / question / idea / fact / decision usually, or the truer name ("risk", "goal") when none fits.',
+          ),
         title: z.string().describe("3-7 words, the point itself. Required."),
         body: z.string().describe("ONE sentence. Required."),
       }),
@@ -142,7 +146,7 @@ return could sit under a different card on a different map, don't return it.`,
       .map((c) => ({
         op: "create_card",
         ref: c.ref,
-        type: c.type,
+        type: normalizeType(c.type),
         title: c.title,
         body: c.body,
         connectTo: [target.id],

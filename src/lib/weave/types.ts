@@ -5,8 +5,16 @@
 // keeps the AI layer pure and testable, and means a bad model response can only
 // ever produce bad ops — never a corrupt board.
 
-export type CardType = "idea" | "action" | "question" | "fact" | "decision";
+/**
+ * Free-form on purpose: the model names what a point actually IS — "risk",
+ * "goal", "metric", "constraint" — rather than being forced to file a risk
+ * under "fact". One short lowercase word by convention (the prompts say so,
+ * and `normalizeType` cleans up whatever comes back anyway).
+ */
+export type CardType = string;
 
+/** The five workhorse types — quick-picks in menus and the colour anchors.
+ *  Not a ceiling: any string is a valid CardType. */
 export const CARD_TYPES: CardType[] = [
   "idea",
   "action",
@@ -14,6 +22,15 @@ export const CARD_TYPES: CardType[] = [
   "fact",
   "decision",
 ];
+
+/** Model output → a display-ready type: lowercase, single-ish word, bounded.
+ *  Falls back to "idea" rather than ever letting an empty type through. */
+export function normalizeType(raw: string): CardType {
+  const t = raw.trim().toLowerCase().replace(/[^a-z0-9 -]/g, "");
+  if (!t) return "idea";
+  // A type is a label, not a sentence — clamp anything rambling.
+  return t.length > 16 ? t.slice(0, 16).trim() : t;
+}
 
 /** One bar of a chart card. */
 export type ChartPoint = { label: string; value: number };
@@ -55,6 +72,12 @@ export type Card = {
    * cards, so your words survive anything you say later.
    */
   pinned?: boolean;
+  /**
+   * Prompt cards only: the cards this prompt was generated from. A prompt is
+   * a snapshot of the idea; keeping its sources means "Regenerate" can re-read
+   * them AS THEY ARE NOW instead of freezing the deliverable on day one.
+   */
+  promptSources?: string[];
 };
 
 export type WeaveEdge = {

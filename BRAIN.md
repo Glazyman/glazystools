@@ -9,6 +9,189 @@ obvious.
 
 ---
 
+## 2026-07-17 — Weave: spoken deletes, prompt lineage, card→transcript lighting
+
+1. **Spoken deletes with a confirm.** "delete the note you just created" →
+   the map route's new `remove` list ({id, reason} — reason quotes the
+   speaker, same no-justification-no-deletion guard as consolidate). Client
+   NEVER auto-applies spoken delete_card ops: they're staged in
+   `confirmDeletes` and land only from the accent-2 banner's [Delete] button
+   ([Keep]/✕ discards; board-switch invalidates). "Newest card" resolution
+   rides on cards being serialized oldest→newest. Verified: correct card
+   picked via `recent` context; consolidate's own delete ops are unaffected
+   (different call path).
+2. **Hesitation guard** (found while testing): "hmm not sure about X
+   honestly" was getting narrated INTO the card body ("Speaker is unsure
+   about this."). New nothing-rule: hovering doubt is not a decision — no
+   card, no update, never narrate mood; map the eventual decision instead.
+3. **Prompt lineage.** Prompt cards store `promptSources` (the card ids they
+   were built from). Right-click → "Regenerate from sources" re-reads those
+   cards AS THEY ARE NOW and rewrites the prompt card in place (same id, same
+   position, history-pushed, re-copied to clipboard). Sources that were
+   deleted just drop out; zero survivors = error, not an empty prompt.
+4. **Card→transcript lighting** (the reverse of the hover direction):
+   selecting cards on the canvas lights the rail lines that built them
+   (`railHighlight` in Weave → `highlight` prop). Rail hover still wins when
+   both are active, and selection scrolls the first lit line into view;
+   hover never scrolls (the pointer is already there).
+
+## 2026-07-17 — Weave: quality-of-life batch (evening)
+
+1. **Connector dots pop in the card's colour** on hover — radio-button style
+   (colour dot + panel gap + colour ring via box-shadow on the Handle,
+   reading --card so custom types work for free).
+2. **Prompt cards: right-click → Download .md** (`downloadCardMd`, reuses
+   export.ts `download`/`slugify`).
+3. **Review digest with veto.** When a review actually changes the board it
+   shows a wip-tone banner — "✦ Review: {summary} [Undo]" — for 20s. Undo
+   restores the PRE-REVIEW SNAPSHOT (not an undo-stack pop, so edits made
+   after the review can't get caught in the blast radius); pushHistory first
+   so ⌘⇧Z re-applies the review. No-change reviews still use the plain notice.
+4. **⌘K search across boards** (BoardSearch.tsx + `allBoards()` in boards.ts —
+   ONE Supabase query for all docs, searched client-side; personal scale).
+   Hits on card title/body + board titles; ↑↓/↵; jump = openBoard + flash the
+   card. ⌘K works even mid-typing (chorded). Toolbar "⌕ Search" too.
+   Lint gotcha: `useEffect(() => setActive(0), [query])` is a build ERROR in
+   this repo (no sync setState in effects) — clamp the index at read time.
+5. **Rail hover shows the whole card-group.** Hovering a transcript line
+   already spotlit its cards on canvas; now every OTHER line that fed the same
+   card(s) stays lit too and unrelated lines recede — the visible group = how
+   many messages built that card. (Chosen over per-card colour coding, which
+   runs out of distinguishable colours by card ~8.)
+6. **toMarkdown free-type fix:** export iterated only CARD_TYPES, silently
+   dropping custom-typed cards (prompt, risk…). Sections now come from the
+   board: five workhorses first, customs in first-appearance order.
+
+## 2026-07-17 — Weave: the two-brain architecture (fast mapper + reasoning review)
+
+The speed work (below) bought a fast per-utterance mapper by disabling
+thinking. This session adds the slow brain back — in the right place:
+
+1. **Auto-review on mic stop.** When you press Space to stop talking, Weave
+   waits for the pipeline to drain (settles → debounce → maps; polled via refs
+   `mappingRef`/`settlingRef`/`pending`/`flushTimer`, 30s bound), then runs the
+   consolidate pass automatically. Consolidate keeps Gemini's thinking ON —
+   per-utterance speed matters, end-of-session judgment matters more. It fixes
+   what the fast mapper got wrong: duplicates, wrong update-vs-create calls,
+   missed edges. Guarded by `spokeRef` (no speech → no review) and a
+   board-at-call check (slow response after board switch must not graft).
+2. **Consolidate can now SPLIT overloaded cards** — the one way it may create:
+   `split: {id, keepType, keepTitle, keepBody, parts[]}` in the schema, parts
+   auto-connected to the original. "You cannot create" became "you may only
+   create by splitting". Verified: merged a duplicate + split out a buried
+   feature and action + linked a risk, in one pass.
+3. **Scope refinements update, not create.** "I want a betting app with the
+   best odds" … pause … "it's a parlay app only" used to make two cards. New
+   map-prompt rule with the parlay example: a refinement that redefines what a
+   thing IS updates that card (test: without folding it in, does the card now
+   say something wrong?). Verified against the exact transcript.
+4. **Card types are free-form.** `CardType = string`; the model names what a
+   point actually is — verified emitting `risk`, `feature`, `revenue model`,
+   `requirement`. The five workhorses stay as menu quick-picks and colour
+   anchors; unknown types hash onto the existing five palette tokens
+   (`typeColor()` in CardNode) so no new colours enter the system.
+   `normalizeType()` (types.ts) bounds whatever the model returns; z.enum →
+   z.string in all four AI routes.
+5. **Split on demand:** right-click → "Split into cards…" → /api/weave/split.
+   Unlike consolidate there's no "prefer doing nothing" — the USER judged the
+   card too big; the model's only honest refusal is "it's genuinely one
+   point". Splitting a pinned card unpins it first (pins guard against the
+   mapper, not against an explicit user action; applyOps would silently
+   refuse the update otherwise).
+6. **Shift+drag = selection box** (React Flow): the gotcha is that Shift was
+   in `multiSelectionKeyCode`, which swallowed the box gesture. Shift moved to
+   `selectionKeyCode`, ⌘ stays for click-accumulate, `SelectionMode.Partial`.
+7. **The IS/HAS rebalance** (same day, after glazy testing): the scope rule
+   overcorrected — the mapper started folding everything into one fat card.
+   The decision rule is now explicit in the prompt: changes what a thing IS →
+   update; something it HAS / DOES / COSTS / NEEDS / RISKS → own card,
+   connected. "An update may REWRITE a card; it must never GROW one." Plus
+   edge specificity: connect to the most SPECIFIC parent, not the hub ("books
+   might ban us" → the scraping card, not the app card — verified). A rich
+   single run now yields several wired cards (verified: idea + feature +
+   constraint + revenue + risk from one breath, risk correctly hung off the
+   feature). Consolidate got the matching rule: a merge must never fatten the
+   survivor — extra points come out as split parts.
+8. **Voice targeting — "talk at what you're pointing at."** Two entry points,
+   one mechanism:
+   - **Card**: select exactly one card, press the talk key → the whole session
+     is aimed at it. `focusCardRef` is captured on the idle→listening
+     transition (from `selectionRef`, synced in the hotkey ref effect), rides
+     into `mapBatch` at flush time (NOT cleared on stop — settles trail the
+     mic), and is released after the review quiesce. The map route gets
+     `focusCardId` and injects an "AIMED AT THIS CARD" block: ambiguity
+     resolves toward the card, "most runs deserve nothing" is suspended, and
+     the pin is explicitly liftable (aimed speech IS the user editing) — the
+     client unpins the focus card before applyOps since the reducer refuses
+     pinned updates. A notice ("Speaking to …") confirms the aim. Verified:
+     "make it twenty bucks a month actually" aimed at a pinned $10 revenue
+     card → direct update to $20; a feature spoken at the app card → connected
+     create, not a fold-in.
+   - **Transcript line**: double-tap a line to edit, press SPACE before typing
+     anything → re-dictate it by voice. Space-before-any-edit is the trigger
+     (once the text is touched, space types spaces again). The next final
+     REPLACES that line: it reuses the line's utterance id (so the accuracy
+     pass flows back to it), auto-stops the mic, and routes through
+     `editUtterance` — the same rewind-and-remap machinery as a typed
+     correction. `redictateRef {id, captured}` guards against a stray second
+     final; stopping before speaking cancels cleanly. Re-dictation skips
+     `spokeRef`, so it doesn't trigger the end-of-session review.
+9. **Build prompt — the board's exit door.** Right-click a card (or a
+   multi-selection containing it) → "Build prompt from N cards…" →
+   /api/weave/prompt composes ONE paste-ready build prompt from those cards
+   and the edges BETWEEN them (edges outside the selection are deliberately
+   excluded — context the user didn't choose isn't part of the ask). Lands as
+   a pinned card typed "prompt" (pinned so mapper/review can't rewrite a
+   deliverable; type "prompt" renders UNCLAMPED in CardNode — a deliverable
+   card is its body) and is copied to the clipboard when the browser allows.
+   Thinking disabled — composition, not judgment. Verified: 5 cards → tight
+   imperative prompt that fused a risk card and its connected mitigation card
+   into one "handle X by Y" instruction, purely from the edge.
+10. **Selected cards show a 2px outline** in the card's type colour. Outline
+   for selection vs ring (box-shadow) for the mapper-touched flash — different
+   CSS mechanisms so they can show simultaneously without clobbering. The
+   outline is the ONLY selection visual now: React Flow's blue group overlay
+   (`.react-flow__nodesselection-rect`) is display:none'd (glazy: the borders
+   already say what's selected) — display, not visibility, so it can't
+   intercept pointer events; dragging any selected card still moves the group.
+   The 3px type stripe on the card's left edge is gone too (type colour still
+   reads from the label, border glow, and outline); card padding back to
+   symmetric px-4.
+
+## 2026-07-17 — Weave: cards land ~2× faster (pause → card ≈ 6.5s → ≈ 3s)
+
+Three cuts, all measured against the gateway with the real prompts:
+
+1. **Map call was 3.3–4.1s because Gemini 2.5 Flash thinks by default.**
+   `providerOptions: { google: { thinkingConfig: { thinkingBudget: 0 } } }`
+   → 1.2–1.5s, and quality held on the tricky cases (filler → nothing,
+   restatement → update, feature → connected create). Faster models were tried
+   and rejected: 2.5-flash-lite / 3.1-flash-lite are quicker but *miss the
+   restatement→update case* (they return nothing); haiku-4.5 took 6–15s.
+   The option is gated on `MODEL.startsWith("google/")` so an env override to
+   a non-Gemini model isn't sent a Google knob.
+2. **Transcription now uses a real STT model, not a chat model.** The gateway
+   serves transcription models (`gateway.transcription(...)` +
+   `experimental_transcribe` from `ai`): `openai/gpt-4o-mini-transcribe` does
+   the accuracy pass in ~0.9–1.0s vs Gemini's 1.3–1.7s, decodes our
+   MediaRecorder webm/opus slices fine, and the gateway reports exact billed
+   USD in `providerMetadata.gateway.cost` (better than token math). The old
+   Gemini path stays as an in-route fallback for clips the STT model rejects
+   (e.g. odd container slices from WKWebView's audio/mp4 recorder).
+3. **`PAUSE_MS` 1500 → 900.** The post-settle debounce sits squarely between
+   the speaker pausing and the card appearing; 900ms still groups same-run
+   utterances given the accuracy pass's ~1s ± 0.5s jitter.
+
+**Dev-server gotcha re-learned:** a long-lived `npm run dev` outlives its
+`VERCEL_OIDC_TOKEN` — gateway calls then *hang* (not 401), which looks exactly
+like a broken route. Restart the dev server before debugging AI routes.
+
+**Next up (agreed with glazy, not built yet):** optimistic mapping — map the
+live Web Speech text immediately at `onFinal` (in parallel with the accuracy
+pass) so the card appears the moment you pause, then reconcile via the existing
+correction re-map when the refined transcript differs. Pairs with letting a
+continued thought after a pause update the just-created card.
+
 ## 2026-07-17 — New tool: **Weave** (voice → thought-map whiteboard)
 
 Tap Space, talk, and the things worth keeping become connected cards on a

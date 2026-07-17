@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { OpenQuestion, Utterance } from "@/lib/weave/types";
 
 export type TranscriptRailProps = {
   utterances: Utterance[];
+  /** Utterances to light up because their card is selected on the canvas —
+   *  the card-to-transcript direction. Hover inside the rail overrides it. */
+  highlight: Set<string> | null;
   /** What's being said right now, before Web Speech commits to it. */
   interim: string;
   questions: OpenQuestion[];
@@ -18,12 +21,15 @@ export type TranscriptRailProps = {
   onSubmitText: (text: string) => void;
   /** Corrected a mis-heard line — the cards it made get fixed to match. */
   onEditUtterance: (id: string, text: string) => void;
+  /** Re-say a mis-heard line by voice instead of retyping it. */
+  onRedictate: (id: string) => void;
   onDismissQuestion: (id: string) => void;
   onAnswerQuestion: (q: OpenQuestion) => void;
 };
 
 export function TranscriptRail({
   utterances,
+  highlight,
   interim,
   questions,
   listening,
@@ -32,6 +38,7 @@ export function TranscriptRail({
   onSpotlight,
   onSubmitText,
   onEditUtterance,
+  onRedictate,
   onDismissQuestion,
   onAnswerQuestion,
 }: TranscriptRailProps) {
@@ -43,11 +50,44 @@ export function TranscriptRail({
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(
     null,
   );
+  const [hovered, setHovered] = useState<string | null>(null);
+
+  // Hovering a line answers "what did this become" in BOTH panes: the canvas
+  // spotlights its cards (via onSpotlight), and here every line that fed any
+  // of those same cards lights up with it — so the size of the group IS how
+  // many messages it took to build that card.
+  const siblings = useMemo(() => {
+    if (!hovered) return null;
+    const u = utterances.find((x) => x.id === hovered);
+    if (!u || u.cardIds.length === 0) return null;
+    const mine = new Set(u.cardIds);
+    const set = new Set<string>();
+    for (const other of utterances) {
+      if (other.cardIds.some((c) => mine.has(c))) set.add(other.id);
+    }
+    return set;
+  }, [hovered, utterances]);
+
+  // One set drives the lit/receded styling. A hover inside the rail is the
+  // more specific intent, so it wins over the canvas selection.
+  const lit = siblings ?? (highlight?.size ? highlight : null);
 
   // Follow the conversation as it grows.
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [utterances.length, interim]);
+
+  // Selecting a card can light lines that are scrolled far out of view —
+  // bring the first one in. Hover never scrolls (the pointer is already here).
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!highlight?.size) return;
+    const first = utterances.find((u) => highlight.has(u.id));
+    if (!first) return;
+    listRef.current
+      ?.querySelector(`[data-uid="${first.id}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [highlight, utterances]);
 
   return (
     <aside className="flex h-full w-[320px] shrink-0 flex-col border-r border-border bg-panel">
@@ -70,7 +110,7 @@ export function TranscriptRail({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {utterances.length === 0 && !interim ? (
           <p className="text-xs leading-relaxed text-subtle">
             Tap{" "}
@@ -102,6 +142,14 @@ export function TranscriptRail({
                         setEditing(null);
                       }
                       if (e.key === "Escape") setEditing(null);
+                      // Space BEFORE any typing = "let me just say it again".
+                      // The moment the text is touched, space types spaces —
+                      // you're keyboard-editing now, not re-dictating.
+                      if (e.key === " " && editing.text === u.text) {
+                        e.preventDefault();
+                        setEditing(null);
+                        onRedictate(u.id);
+                      }
                     }}
                     onBlur={() => {
                       onEditUtterance(u.id, editing.text);
@@ -111,25 +159,39 @@ export function TranscriptRail({
                     className="w-full resize-none bg-transparent text-xs leading-relaxed text-fg outline-none"
                   />
                   <div className="font-mono text-[9px] uppercase tracking-wider text-subtle">
-                    ↵ to fix its cards · esc to cancel
+                    space to re-say it · ↵ to fix its cards · esc to cancel
                   </div>
                 </div>
               ) : (
                 <button
                   key={u.id}
-                  onMouseEnter={() =>
-                    onSpotlight(u.cardIds.length ? u.cardIds : null)
-                  }
-                  onMouseLeave={() => onSpotlight(null)}
+                  data-uid={u.id}
+                  onMouseEnter={() => {
+                    setHovered(u.id);
+                    onSpotlight(u.cardIds.length ? u.cardIds : null);
+                  }}
+                  onMouseLeave={() => {
+                    setHovered(null);
+                    onSpotlight(null);
+                  }}
                   onDoubleClick={() => setEditing({ id: u.id, text: u.text })}
                   title="Double-click to fix what it heard"
                   className={[
-                    "w-full rounded-[10px] border px-3 py-2 text-left transition-colors",
+                    "w-full rounded-[10px] border px-3 py-2 text-left transition-all",
                     u.cardIds.length
                       ? "border-border-strong bg-elevated hover:border-accent"
                       : // Filler that produced nothing — visibly lesser, so the
                         // rail reads as a record rather than a list of failures.
                         "border-border bg-transparent opacity-50 hover:opacity-80",
+                    // While a line is hovered (or a card is selected on the
+                    // canvas), the lines that built that card stay lit and
+                    // everything unrelated recedes — the group you see is the
+                    // group that built it.
+                    lit
+                      ? lit.has(u.id)
+                        ? "!border-accent !opacity-100"
+                        : "!opacity-25"
+                      : "",
                   ].join(" ")}
                 >
                   <p className="text-xs leading-relaxed text-fg">

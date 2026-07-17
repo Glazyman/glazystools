@@ -17,6 +17,14 @@
   border: 1px solid var(--accent);
 }
 
+/* No group overlay after a multi-select — each selected card already shows
+ * its own outline, and the big blue box just sits on top of everything.
+ * display:none (not visibility) so it can't intercept pointer events either;
+ * dragging any selected card still moves the whole selection. */
+.weave-root .react-flow__nodesselection-rect {
+  display: none;
+}
+
 /* ── Dark = neon ──────────────────────────────────────────────────────────
    Cards are lit objects on a near-black field rather than paper on a desk.
    Same five type colours, pushed to their neon register — on #08080c the

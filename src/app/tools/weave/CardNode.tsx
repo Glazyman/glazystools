@@ -21,6 +21,20 @@ export const TYPE_VAR: Record<CardType, string> = {
   decision: "var(--wip)", // yellow — settled
 };
 
+// Types are free-form now — the model can say "risk" or "metric" — but the
+// palette isn't: every type still lands on an existing token. Hashing the name
+// keeps a given custom type the same colour everywhere, forever, with no
+// registry to maintain.
+const PALETTE = Object.values(TYPE_VAR);
+
+export function typeColor(type: CardType): string {
+  const known = TYPE_VAR[type];
+  if (known) return known;
+  let h = 0;
+  for (let i = 0; i < type.length; i += 1) h = (h * 31 + type.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
 export type CardNodeData = {
   card: Card;
   /** Briefly ringed after the mapper touches it, so you can see what changed. */
@@ -203,7 +217,7 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
     }
   };
 
-  const color = TYPE_VAR[card.type];
+  const color = typeColor(card.type);
 
   return (
     <div
@@ -213,17 +227,16 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
         // weave-card is the hook the neon dark theme hangs its per-type glow
         // off — it reads the --card var set just above.
         "weave-card group relative rounded-[var(--radius)] border bg-panel shadow-card transition-all duration-200",
-        selected ? "border-[var(--card)]" : "border-border",
+        // Selection = outline, flash = ring (box-shadow): different CSS
+        // mechanisms on purpose, so a selected card that the mapper just
+        // touched shows both instead of one silently clobbering the other.
+        selected
+          ? "border-[var(--card)] outline outline-2 outline-offset-2 outline-[var(--card)]"
+          : "border-border outline-none",
         flash ? "ring-2 ring-[var(--card)] ring-offset-2 ring-offset-bg" : "",
         dimmed ? "opacity-25" : "opacity-100",
       ].join(" ")}
     >
-      {/* Type stripe — the fastest way to read the board at a glance. */}
-      <div
-        className="absolute left-0 top-0 h-full w-[3px] rounded-l-[var(--radius)]"
-        style={{ background: color }}
-      />
-
       {/* Delete — a badge on the corner, revealed on hover. Deliberately
           outside the card's own padding so it never competes with the text. */}
       <button
@@ -238,18 +251,31 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
         ✕
       </button>
 
+      {/* Connector dots — a filled dot in the card's colour with a panel gap
+          and a thin outer ring (radio-button style), popping in on hover so
+          "you can draw a line from here" reads instantly. The colour comes
+          from --card, so custom types stay consistent for free. */}
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2.5 !w-2.5 !border-0 !bg-border-strong !opacity-0 transition-opacity group-hover:!opacity-100 hover:!bg-[var(--card)]"
+        className="!h-2.5 !w-2.5 !border-0 !bg-[var(--card)] !opacity-0 transition-opacity group-hover:!opacity-100"
+        style={{
+          boxShadow:
+            "0 0 0 2px var(--bg-panel), 0 0 0 3.5px var(--card)",
+        }}
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2.5 !w-2.5 !border-0 !bg-border-strong !opacity-0 transition-opacity group-hover:!opacity-100 hover:!bg-[var(--card)]"
+        className="!h-2.5 !w-2.5 !border-0 !bg-[var(--card)] !opacity-0 transition-opacity group-hover:!opacity-100"
+        style={{
+          boxShadow:
+            "0 0 0 2px var(--bg-panel), 0 0 0 3.5px var(--card)",
+        }}
       />
 
-      <div className="px-4 py-3 pl-5">
+      {/* Symmetric padding now that the type stripe is gone. */}
+      <div className="px-4 py-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <button
             onClick={() => onCycleType(card.id)}
@@ -316,7 +342,14 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
               {card.title}
             </h3>
             {card.body && (
-              <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-muted">
+              <p
+                className={[
+                  "mt-1 text-xs leading-relaxed text-muted",
+                  // A prompt card IS its body — clamping a deliverable to
+                  // three lines would hide the thing it exists to carry.
+                  card.type === "prompt" ? "whitespace-pre-wrap" : "line-clamp-3",
+                ].join(" ")}
+              >
                 {card.body}
               </p>
             )}
