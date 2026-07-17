@@ -54,6 +54,34 @@ settle with the original text or the card never appears. MediaRecorder timeslice
 chunks are bare EBML clusters: the **first chunk's header must be re-prepended**
 to every slice or it won't decode.
 
+**Weave Bar — the Mac app** (`~/WeaveBar`, installed to `/Applications`).
+Menu bar icon → Weave opens as a real window AND the app appears in the Dock;
+close it → Dock icon goes, app stays in the menu bar. That's an activation
+policy flip: Accessory (LSUIElement) at rest, Regular while the window is open.
+It's a WKWebView on **`/weave`** — the bare route, no workspace sidebar; a
+sidebar listing other tools is noise inside an app that IS one tool. Built the
+Desk Notes way: Objective-C + clang + ad-hoc codesign, no Xcode.
+
+Things that would otherwise cost an hour each:
+- **WKWebView denies `getUserMedia` silently** — the page just sees a mic that
+  never works. `requestMediaCapturePermissionForOrigin` is what actually grants
+  it; `NSMicrophoneUsageDescription` only drives macOS's own prompt.
+- **`webkitSpeechRecognition` DOES exist in WKWebView** (probed it: `"function"`,
+  and the app confirms the board renders with speech live). Desk Notes bundling
+  whisper.cpp was a choice, not a workaround.
+- **The web view outlives the window** — closing hides it. Rebuilding would
+  reload the board, drop the mic session, and cost a Supabase round-trip per open.
+- **A Regular app with no main menu has no ⌘C/⌘V/⌘Q** — the shortcuts live on
+  menu items, so the web view couldn't even copy. Hence `buildMenu`.
+- **Flip the policy to Accessory in a deferred block** on window close; doing it
+  inline is too early and the Dock icon can survive it.
+- **The app can't be screenshotted by computer-use** — an LSUIElement app has no
+  Dock identity to allowlist, so the compositor hides it. Verify it through
+  `osascript` window counts and `evaluateJavaScript` logs instead.
+
+Since it's a shell around the live site, **shipping the website updates the app**.
+Rebuild only for shell changes.
+
 **Shell change:** `ToolPage` gained generic `bleed` (no max-width, no page
 scroll) and `hideHeader` props for tools that own their viewport. Kept generic
 per golden rule 3.
