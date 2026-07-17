@@ -73,6 +73,33 @@ component needed editing and no raw hex entered them (golden rule 5 in spirit).
   `color-mix(in srgb, var(--card) …)` in the border + box-shadow. `--planned`
   (fact) goes grey → `#7aa2ff`; grey has no neon register.
 
+**Cost, not a timer.** The header showed minutes since the board's first
+utterance, which climbed while the tab just sat there. It shows real spend now
+(`7 cards · $0.002`). Pricing comes from `gateway.getAvailableModels()` — a
+hard-coded price table would be wrong the moment Google moved a number, and
+quiet about it. Every route returns its call's cost; `doc.spend` accumulates it
+per board. A mapped sentence ≈ $0.001, an expand ≈ $0.004.
+
+**⚠️ applyOps silently ate a field.** It rebuilt the doc from an explicit key
+list (`{cards, edges, utterances, questions}`), so `spend` was banked and wiped
+microseconds later by the very next op — and the NEXT field added would have
+gone the same way. It spreads `input` now.
+
+**Talk key is rebindable (⚙), including bare modifiers** (⌘/⌃/⌥/⇧/Caps).
+Modifiers fire their own keydown when pressed alone, so excluding them was just
+wrong. Two catches: the handler's normal "held with a modifier ⇒ that's a chord,
+not our key" rule must be skipped when the binding IS a modifier, or it can
+never fire; and `e.repeat` has to be guarded, since holding a key repeats
+keydown and a toggle must fire once per press. The UI warns when a modifier is
+bound (⌘+C would start listening as it copies). Escape stays reserved as
+capture's way out. **Fn is not bindable** — browsers don't report a keydown for
+it on macOS. Stored as `event.code` (layout-independent, unlike `key`), and the
+capture listener runs in the CAPTURE phase so the key you press can't be
+swallowed by the binding it's replacing.
+
+**Type as well as talk.** A box at the foot of the rail runs the same pipeline
+with no mic. Double-click any transcript line to fix what it misheard.
+
 **No confidence score.** Cut entirely — model, schemas, prompts, UI. It was
 meant to separate "you clearly said this" from "half-caught from a mumble", but
 models can't self-rate: every AI card came back ~100%, so the dots and % were

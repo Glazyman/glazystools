@@ -41,8 +41,31 @@ const TALK_KEY = "weave:talkKey";
 /** Stored as KeyboardEvent.code — layout-independent, unlike `key`. */
 const DEFAULT_TALK_KEY = "Space";
 
-/** "KeyT" → "T", "Digit1" → "1", "ArrowUp" → "Arrow Up". */
+/**
+ * Modifiers are bindable. They fire their own keydown when pressed alone, so
+ * there's no reason to exclude them — but the handler has to know, because its
+ * normal "ignore anything held with a modifier" rule would make the binding
+ * unreachable by itself.
+ */
+const MODIFIER_CODES: Record<string, string> = {
+  MetaLeft: "⌘ Left",
+  MetaRight: "⌘ Right",
+  ControlLeft: "⌃ Left",
+  ControlRight: "⌃ Right",
+  AltLeft: "⌥ Left",
+  AltRight: "⌥ Right",
+  ShiftLeft: "⇧ Left",
+  ShiftRight: "⇧ Right",
+  CapsLock: "Caps Lock",
+};
+
+function isModifierKey(code: string): boolean {
+  return code in MODIFIER_CODES;
+}
+
+/** "KeyT" → "T", "Digit1" → "1", "MetaLeft" → "⌘ Left". */
 function keyLabel(code: string): string {
+  if (MODIFIER_CODES[code]) return MODIFIER_CODES[code];
   if (code === "Space") return "Space";
   if (code.startsWith("Key")) return code.slice(3);
   if (code.startsWith("Digit")) return code.slice(5);
@@ -573,11 +596,21 @@ export function Weave() {
           t.isContentEditable);
       if (typing) return;
 
-      if (e.code === talkKeyRef.current && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        // Space would otherwise scroll the page — and whatever it's bound to,
-        // the key is ours once you're on the board and not typing.
-        e.preventDefault();
-        toggleRef.current();
+      // Holding a key repeats keydown; a toggle must fire on the press only.
+      if (e.repeat) return;
+
+      const bound = talkKeyRef.current;
+      if (e.code === bound) {
+        // A modifier binding is reached by pressing that modifier — so the
+        // usual "held with a modifier means it's a chord, not our key" rule
+        // can't apply to it, or it could never fire at all.
+        const chord =
+          !isModifierKey(bound) && (e.metaKey || e.ctrlKey || e.altKey);
+        if (!chord) {
+          // Space would otherwise scroll the page.
+          e.preventDefault();
+          toggleRef.current();
+        }
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -1008,8 +1041,8 @@ export function Weave() {
             questions={doc.questions}
             listening={listening}
             level={speech.level}
+            talkKeyLabel={keyLabel(talkKey)}
             onSpotlight={(ids) => setSpotlight(ids ? new Set(ids) : null)}
-            onClose={toggleRail}
             onSubmitText={addTyped}
             onEditUtterance={editUtterance}
             onDismissQuestion={(id) =>
@@ -1166,10 +1199,11 @@ function SettingsMenu({
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      if (e.repeat) return; // still holding the key from opening this
       setCapturing(false);
-      // A bare modifier can't be a binding — it never arrives on its own.
-      if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
-      if (e.key === "Escape") return; // Escape means "never mind"
+      // Escape is the way out of capture, so it can't also be a binding.
+      if (e.code === "Escape") return;
+      // Anything else goes — modifiers included. They fire their own keydown.
       onTalkKey(e.code);
     };
     window.addEventListener("keydown", onKey, true);
@@ -1207,6 +1241,15 @@ function SettingsMenu({
             {capturing ? "Press a key…" : keyLabel(talkKey)}
           </button>
         </div>
+        {isModifierKey(talkKey) && (
+          <p
+            className="mt-2.5 text-[11px] leading-snug"
+            style={{ color: "var(--accent-2)" }}
+          >
+            Every shortcut that uses {keyLabel(talkKey)} will toggle the mic too
+            — {keyLabel(talkKey)}+C will start listening as it copies.
+          </p>
+        )}
         {talkKey !== DEFAULT_TALK_KEY && (
           <button
             onClick={() => onTalkKey(DEFAULT_TALK_KEY)}

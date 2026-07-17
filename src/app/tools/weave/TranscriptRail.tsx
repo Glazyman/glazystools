@@ -11,8 +11,9 @@ export type TranscriptRailProps = {
   listening: boolean;
   /** Mic input level 0..1. */
   level: number;
+  /** Whatever the talk key is currently bound to, for the empty state. */
+  talkKeyLabel: string;
   onSpotlight: (cardIds: string[] | null) => void;
-  onClose: () => void;
   /** Typed instead of spoken. */
   onSubmitText: (text: string) => void;
   /** Corrected a mis-heard line — the cards it made get fixed to match. */
@@ -27,8 +28,8 @@ export function TranscriptRail({
   questions,
   listening,
   level,
+  talkKeyLabel,
   onSpotlight,
-  onClose,
   onSubmitText,
   onEditUtterance,
   onDismissQuestion,
@@ -54,28 +55,19 @@ export function TranscriptRail({
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-subtle">
           Live transcript
         </span>
-        <div className="flex items-center gap-2">
-          {listening && (
-            <>
-              {/* Mic meter — proof the browser is actually hearing you, which is
-                  the first thing you doubt when no cards appear. */}
-              <div className="h-1 w-12 overflow-hidden rounded-full bg-elevated">
-                <div
-                  className="h-full rounded-full bg-accent transition-[width] duration-75"
-                  style={{ width: `${Math.min(100, level * 140)}%` }}
-                />
-              </div>
-              <span className="font-mono text-[10px] text-accent">REC</span>
-            </>
-          )}
-          <button
-            onClick={onClose}
-            title="Hide transcript"
-            className="font-mono text-xs text-subtle transition-colors hover:text-fg"
-          >
-            ✕
-          </button>
-        </div>
+        {listening && (
+          <div className="flex items-center gap-2">
+            {/* Mic meter — proof the browser is actually hearing you, which is
+                the first thing you doubt when no cards appear. */}
+            <div className="h-1 w-12 overflow-hidden rounded-full bg-elevated">
+              <div
+                className="h-full rounded-full bg-accent transition-[width] duration-75"
+                style={{ width: `${Math.min(100, level * 140)}%` }}
+              />
+            </div>
+            <span className="font-mono text-[10px] text-accent">REC</span>
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -83,10 +75,11 @@ export function TranscriptRail({
           <p className="text-xs leading-relaxed text-subtle">
             Tap{" "}
             <kbd className="rounded border border-border bg-elevated px-1.5 py-0.5 font-mono text-[10px] text-muted">
-              Space
+              {talkKeyLabel}
             </kbd>{" "}
             and start talking. Tap it again to stop. Everything you say lands
-            here; the things that matter become cards on the right.
+            here; the things that matter become cards on the right — or type it
+            below.
           </p>
         ) : (
           <div className="space-y-2">
