@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { isImage } from "@/lib/weave/attachments";
+import { previewKind } from "@/lib/weave/attachments";
 import type { Attachment } from "@/lib/weave/types";
 
 export type LightboxState = {
@@ -90,24 +90,7 @@ export function Lightbox({ state, onClose, onMove, onDelete }: LightboxProps) {
         </div>
 
         <div className="relative flex min-h-0 items-center justify-center bg-bg">
-          {isImage(item) ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={item.url}
-              alt={item.name}
-              className="max-h-[70vh] max-w-full object-contain"
-            />
-          ) : (
-            // Not everything can be shown. Say so rather than render a blank
-            // rectangle and let it look broken.
-            <div className="px-16 py-20 text-center">
-              <div className="text-3xl">📎</div>
-              <p className="mt-3 text-xs text-muted">{item.name}</p>
-              <p className="mt-1 text-[11px] text-subtle">
-                Can&rsquo;t preview this one — use Open.
-              </p>
-            </div>
-          )}
+          <Preview item={item} />
 
           {items.length > 1 && (
             <>
@@ -121,6 +104,63 @@ export function Lightbox({ state, onClose, onMove, onDelete }: LightboxProps) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Show the file itself where we can.
+ *
+ * PDFs, video, audio and text all render in-place — including inside the Mac
+ * app, since it's the same engine. What we can't render, we say so about:
+ * an <iframe> pointed at an unsupported type renders a blank white rectangle,
+ * which reads as a broken app rather than an unsupported file.
+ */
+function Preview({ item }: { item: Attachment }) {
+  const kind = previewKind(item);
+
+  if (kind === "image") {
+    /* eslint-disable-next-line @next/next/no-img-element */
+    return (
+      <img
+        src={item.url}
+        alt={item.name}
+        className="max-h-[70vh] max-w-full object-contain"
+      />
+    );
+  }
+  if (kind === "video") {
+    return (
+      // eslint-disable-next-line jsx-a11y/media-has-caption
+      <video src={item.url} controls className="max-h-[70vh] max-w-full" />
+    );
+  }
+  if (kind === "audio") {
+    return (
+      <div className="px-16 py-20 text-center">
+        <div className="mb-4 text-3xl">🔊</div>
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <audio src={item.url} controls className="w-80" />
+        <p className="mt-3 text-xs text-muted">{item.name}</p>
+      </div>
+    );
+  }
+  if (kind === "pdf" || kind === "text") {
+    return (
+      <iframe
+        src={item.url}
+        title={item.name}
+        className="h-[70vh] w-[80vw] max-w-4xl border-0 bg-white"
+      />
+    );
+  }
+  return (
+    <div className="px-16 py-20 text-center">
+      <div className="text-3xl">📎</div>
+      <p className="mt-3 text-xs text-muted">{item.name}</p>
+      <p className="mt-1 text-[11px] text-subtle">
+        Can&rsquo;t preview a {item.mime || "file"} — use Open.
+      </p>
     </div>
   );
 }

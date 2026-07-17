@@ -63,3 +63,31 @@ export async function deleteAttachment(path: string): Promise<void> {
 export function isImage(a: Attachment): boolean {
   return a.mime.startsWith("image/");
 }
+
+/**
+ * How to show a file, if at all.
+ *
+ * Deliberately mime-driven and conservative: an <iframe> pointed at something
+ * the engine can't render doesn't fail loudly, it renders a blank white
+ * rectangle — which looks exactly like a broken app. Better to say "can't
+ * preview this" than to show nothing and call it a preview.
+ */
+export type Preview = "image" | "video" | "audio" | "pdf" | "text" | "none";
+
+export function previewKind(a: Attachment): Preview {
+  const m = a.mime.toLowerCase();
+  if (m.startsWith("image/")) return "image";
+  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("audio/")) return "audio";
+  if (m === "application/pdf") return "pdf";
+  // Everything here renders as plain text in a frame. JSON and CSV are the ones
+  // you actually end up pinning to a card.
+  if (
+    m.startsWith("text/") ||
+    m === "application/json" ||
+    m === "application/xml"
+  ) {
+    return "text";
+  }
+  return "none";
+}
