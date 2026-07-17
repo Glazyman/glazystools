@@ -1327,11 +1327,18 @@ function BoardMenu({
   onDelete: (id: string) => void;
 }) {
   const { ref, close } = useMenu();
+  // Tailwind never emits `group-open:` here — there isn't a single rotate-180
+  // rule in the built CSS — so the chevron is turned from state instead of by a
+  // variant that silently does nothing.
+  const [open, setOpen] = useState(false);
   return (
     // `relative` lives HERE, not on the <details>: anchored to the control, the
     // menu drops straight down under the name instead of hanging off a chevron.
     <div className="relative">
-      <details ref={ref}>
+      <details
+        ref={ref}
+        onToggle={(e) => setOpen(e.currentTarget.open)}
+      >
         {/* Name and chevron are one button. The name used to be a bare input
             sitting in the toolbar — which looked like a label, behaved like a
             field, and put renaming somewhere you'd never look for it. */}
@@ -1339,7 +1346,23 @@ function BoardMenu({
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
             {title || "Untitled board"}
           </span>
-          <span className="shrink-0 text-xs text-subtle">⌄</span>
+          {/* Drawn, not typed. The "⌄" glyph carries its font's own metrics —
+              it hangs below the text's centre line and no amount of alignment
+              fixes it. An SVG sits exactly where it's put, and turns over when
+              the menu is open. */}
+          <svg
+            viewBox="0 0 12 12"
+            aria-hidden
+            style={{ transform: open ? "rotate(180deg)" : undefined }}
+            className="h-3 w-3 shrink-0 text-subtle transition-transform duration-150"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 4.75 L6 7.75 L9 4.75" />
+          </svg>
         </summary>
         <div className="absolute left-0 top-full z-20 mt-1.5 w-72 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
           {/* Rename lives in here, next to the list of things it could be
