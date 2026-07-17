@@ -75,6 +75,10 @@ Things that would otherwise cost an hour each:
   menu items, so the web view couldn't even copy. Hence `buildMenu`.
 - **Flip the policy to Accessory in a deferred block** on window close; doing it
   inline is too early and the Dock icon can survive it.
+- **No traffic lights**, and the window opens on the ACTIVE Space. Without
+  `NSWindowCollectionBehaviorMoveToActiveSpace` the window keeps whichever Space
+  it was born on, so clicking the icon threw you onto a different desktop
+  instead of showing up where you were. ⌘W replaces the close button.
 - **The app can't be screenshotted by computer-use** — an LSUIElement app has no
   Dock identity to allowlist, so the compositor hides it. Verify it through
   `osascript` window counts and `evaluateJavaScript` logs instead.
