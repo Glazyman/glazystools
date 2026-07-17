@@ -9,6 +9,86 @@ obvious.
 
 ---
 
+## 2026-07-17 — New tool: **Weave** (voice → thought-map whiteboard)
+
+Tap Space, talk, and the things worth keeping become connected cards on a
+canvas. Modelled on sayweave.com but tap-to-toggle rather than hold-to-talk.
+
+**Shape:** `src/lib/weave/` (types, `ops.ts` reducer, `layout.ts`, `boards.ts`)
+· `src/app/api/weave/{map,transcribe,consolidate}` · `src/app/tools/weave/`
+(Weave, Board, CardNode, TranscriptRail, useSpeech, export). React Flow
+(`@xyflow/react` v12) for the canvas — gives edges, handles, pan/zoom free.
+
+**The model never touches the board.** It reads state and emits `Op[]`;
+`applyOps` folds them in. A hallucinated id or dupe edge gets dropped, never
+corrupts the doc. Card types map onto existing palette tokens only (idea=accent,
+action=live, question=accent-2, fact=planned, decision=wip) — no new colours.
+
+**⚠️ The structured-output lesson (cost an hour, don't repeat it):** the obvious
+schema — one `ops` array of `{op, ...all optional}` — *silently fails*. Gemini
+returns `{op:"create_card", ref:"c1", type:"idea"}` with **no title/body**,
+because nothing in the schema compels them; the reasoning field even claimed it
+made a card. Fix: **one array per op kind, every field required** (`create`,
+`update`, `link`, `unlink`, `ask`). Optional-in-spirit fields are required
+strings where `""` = absent. Applies to `map` AND `consolidate`.
+
+**React Flow gotcha:** `useReactFlow().fitView/zoomIn` came back **inert** here
+(no-ops) while mouse wheel zoom worked and the store was perfectly populated.
+Don't fight it — use the `fitView` **prop** for initial framing (it waits for
+node measurement, which a hand-rolled effect gets wrong) and the instance from
+`onInit` for buttons. `<Board key={boardId}>` remounts per board so each frames
+once on open.
+
+**Storage:** one jsonb doc per board in `weave_boards` (schema:
+`docs/weave-schema.sql`, already run on prod). A board is always read/written
+whole, so a document beats normalised tables + a sync protocol. Debounced 800ms
+autosave. `getBoard` normalises `refining` → `final` on load: an accuracy pass
+in flight when the tab closed never lands, and the rail would say "sharpening…"
+forever.
+
+**Speech:** two tiers. Web Speech API streams interim text live (Chrome only,
+free); MediaRecorder captures the same audio and `/api/weave/transcribe` re-does
+it properly with Gemini. `onSettled` fires **exactly once per utterance on every
+path** (try/finally) — mapping keys off it, so a refinement failure must still
+settle with the original text or the card never appears. MediaRecorder timeslice
+chunks are bare EBML clusters: the **first chunk's header must be re-prepended**
+to every slice or it won't decode.
+
+**Shell change:** `ToolPage` gained a generic `bleed` prop (no max-width, no
+page scroll) for tools that own their viewport. Kept generic per golden rule 3.
+
+**Batched mapping (not per-sentence).** Utterances buffer in `pending` and flush
+as ONE call after `PAUSE_MS` 1500ms of silence (or `MAX_BATCH` 6 / `MAX_WAIT_MS`
+12s, so a monologue can't bank up forever). This started as a rate-limit dodge
+(3-5x fewer calls) but is the better design outright: the mapper gets the whole
+thought, so same-batch `connectTo` refs let it chain cards. Verified — one
+3-sentence run produced idea → fact → action *connected*, which per-sentence
+mapping physically cannot do (each call saw one sentence, nothing to link to).
+`applyOps` therefore takes `utteranceIds: string[]`; every utterance in a run
+gets credit for the cards, since you can't attribute a card to one sentence
+inside it. `dropBatch()` on board switch, and `mapBatch` compares `boardIdRef`
+before applying — a response landing after a switch would otherwise graft cards
+onto the wrong board.
+
+**Rate limits — resolved.** Heaviest AI use in the repo: `transcribe` fires once
+per *sentence* (sends audio, not batched), `map` once per *pause* (batched). The
+free tier throttles requests/minute regardless of remaining Free Credit, which
+blocked testing repeatedly. Fixed by putting paid credit on the AI Gateway —
+note it's the *paid lane* that lifts the throttle, not the balance; $3.24 of
+Free Credit sat unused while every call 429'd. Cost is negligible: 21 requests =
+$0.01, so a session is ~a cent. If it ever needs cutting further, batch the
+run's audio into one transcribe call at flush (≈40 calls → ≈10).
+
+**Verified end-to-end:** live mic → transcript → `map` 200 in ~1.15s → card ·
+autosave to Supabase · all 5 card types · edges + labels · board frames on load ·
+no console errors · filler ignored ("I wanna get a" → 0 ops) · batched 3-sentence
+run → idea→fact→action *chained* · **dedup** (pure restatement → 0 ops;
+restatement + new detail → `update_card`, never a duplicate) · **consolidate**
+(merged dupe via update-then-delete, dropped junk, added a missed link, and left
+the `pinned:true` card untouched).
+
+---
+
 ## 2026-07-09 — Dark-editorial redesign + Post Analysis overhaul (v20 → v38)
 
 **Design system (21st.dev-inspired "mix of two directions"):** flipped the whole

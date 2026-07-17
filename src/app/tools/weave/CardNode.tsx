@@ -1,0 +1,187 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+// Aliased: React Flow's `Node` would otherwise shadow the DOM's `Node`, which
+// the focus-out check below needs.
+import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
+import { CARD_W } from "@/lib/weave/layout";
+import type { Card, CardType } from "@/lib/weave/types";
+
+// Every type maps onto an existing palette token — no new colours enter the
+// design system just because this tool needs five categories.
+const TYPE_VAR: Record<CardType, string> = {
+  idea: "var(--accent)", // lime — a possibility
+  action: "var(--live)", // green — go do it
+  question: "var(--accent-2)", // orange — unresolved
+  fact: "var(--planned)", // grey — immovable reality
+  decision: "var(--wip)", // yellow — settled
+};
+
+export type CardNodeData = {
+  card: Card;
+  /** Briefly ringed after the mapper touches it, so you can see what changed. */
+  flash: boolean;
+  /** Faded because the transcript hover is spotlighting other cards. */
+  dimmed: boolean;
+  linkCount: number;
+  onCommit: (id: string, patch: { title: string; body: string }) => void;
+  onCycleType: (id: string) => void;
+};
+
+export type CardNodeType = FlowNode<CardNodeData, "card">;
+
+export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
+  const { card, flash, dimmed, linkCount, onCommit, onCycleType } = data;
+  // The draft exists only while editing. Keeping no mirrored copy of the card
+  // means there's nothing to re-sync when the mapper rewrites this card
+  // underneath us — the props stay the single display source.
+  const [draft, setDraft] = useState<{ title: string; body: string } | null>(
+    null,
+  );
+  const editing = draft !== null;
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editing) titleRef.current?.focus();
+  }, [editing]);
+
+  const commit = () => {
+    if (!draft) return;
+    const title = draft.title.trim();
+    const body = draft.body.trim();
+    setDraft(null);
+    if (title && (title !== card.title || body !== card.body)) {
+      onCommit(card.id, { title, body });
+    }
+  };
+
+  const color = TYPE_VAR[card.type];
+  const dots = Math.max(1, Math.round(card.confidence * 4));
+
+  return (
+    <div
+      style={{ width: CARD_W, ["--card" as string]: color }}
+      onDoubleClick={() => setDraft({ title: card.title, body: card.body })}
+      className={[
+        "group relative rounded-[var(--radius)] border bg-panel shadow-card transition-all duration-200",
+        selected ? "border-[var(--card)]" : "border-border",
+        flash ? "ring-2 ring-[var(--card)] ring-offset-2 ring-offset-bg" : "",
+        dimmed ? "opacity-25" : "opacity-100",
+      ].join(" ")}
+    >
+      {/* Type stripe — the fastest way to read the board at a glance. */}
+      <div
+        className="absolute left-0 top-0 h-full w-[3px] rounded-l-[var(--radius)]"
+        style={{ background: color }}
+      />
+
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!h-2.5 !w-2.5 !border-0 !bg-border-strong !opacity-0 transition-opacity group-hover:!opacity-100 hover:!bg-[var(--card)]"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!h-2.5 !w-2.5 !border-0 !bg-border-strong !opacity-0 transition-opacity group-hover:!opacity-100 hover:!bg-[var(--card)]"
+      />
+
+      <div className="px-4 py-3 pl-5">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <button
+            onClick={() => onCycleType(card.id)}
+            title="Click to change type"
+            className="nodrag cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] transition-opacity hover:opacity-70"
+            style={{ color }}
+          >
+            {card.type}
+          </button>
+          {card.pinned && (
+            <span
+              title="You edited this — the AI won't rewrite it"
+              className="font-mono text-[9px] uppercase tracking-wider text-subtle"
+            >
+              pinned
+            </span>
+          )}
+        </div>
+
+        {draft ? (
+          // onBlur bubbles (it's focusout), so this commits when focus leaves
+          // the editor entirely — but not when it moves title → body.
+          <div
+            className="nodrag space-y-1.5"
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                commit();
+              }
+            }}
+          >
+            <textarea
+              ref={titleRef}
+              value={draft.title}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d!, title: e.target.value }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  commit();
+                }
+                if (e.key === "Escape") setDraft(null);
+                e.stopPropagation();
+              }}
+              rows={2}
+              className="w-full resize-none rounded-md bg-elevated px-2 py-1 text-sm font-medium leading-snug outline-none ring-1 ring-border-strong"
+            />
+            <textarea
+              value={draft.body}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d!, body: e.target.value }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setDraft(null);
+                e.stopPropagation();
+              }}
+              rows={3}
+              className="w-full resize-none rounded-md bg-elevated px-2 py-1 text-xs leading-relaxed text-muted outline-none ring-1 ring-border-strong"
+            />
+          </div>
+        ) : (
+          <>
+            <h3 className="text-sm font-medium leading-snug text-fg">
+              {card.title}
+            </h3>
+            {card.body && (
+              <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-muted">
+                {card.body}
+              </p>
+            )}
+          </>
+        )}
+
+        <div className="mt-3 flex items-center gap-2">
+          <div className="flex gap-1">
+            {[0, 1, 2, 3].map((i) => (
+              <span
+                key={i}
+                className="h-1.5 w-1.5 rounded-full"
+                style={{
+                  background: i < dots ? color : "var(--border-strong)",
+                }}
+              />
+            ))}
+          </div>
+          <span className="font-mono text-[10px] text-subtle">
+            {Math.round(card.confidence * 100)}%
+          </span>
+          {linkCount > 0 && (
+            <span className="ml-auto font-mono text-[10px] text-subtle">
+              ⇄ {linkCount}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

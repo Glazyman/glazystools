@@ -9,10 +9,17 @@ export function ToolPage({
   slug,
   children,
   actions,
+  bleed = false,
 }: {
   slug: string;
   children: ReactNode;
   actions?: ReactNode;
+  /**
+   * Hand the tool the full content area: no max-width, no padding, no page
+   * scroll. For tools that own their own viewport (canvases, maps, editors)
+   * where the centred scrolling column would be actively wrong.
+   */
+  bleed?: boolean;
 }) {
   const tool = getTool(slug);
   if (!tool) notFound();
@@ -41,12 +48,16 @@ export function ToolPage({
           {actions && <div className="flex items-center gap-2">{actions}</div>}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <ScrollRestore />
-        <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
-          {children}
+      {bleed ? (
+        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ScrollRestore />
+          <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
+            {children}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -17,6 +17,17 @@ export type Tool = {
 
 export const tools: Tool[] = [
   {
+    slug: "weave",
+    name: "Weave",
+    tagline: "Think out loud, watch the map build itself",
+    description:
+      "Tap Space and talk. Everything you say lands in the transcript; the things that actually matter become cards on a whiteboard, connected to what they follow from. Filler and false starts are ignored. Drag cards around, rewire the connections by hand, and consolidate the board in one pass when you're done. Keep as many boards as you like.",
+    icon: "🕸️",
+    category: "Tools",
+    status: "wip",
+    accent: "lime",
+  },
+  {
     slug: "post-analysis",
     name: "Post Analysis",
     tagline: "Analyze any post's video & comments for ideas",
