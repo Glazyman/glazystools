@@ -27,7 +27,7 @@ import { CardNode, type CardNodeType } from "./CardNode";
 // changes between renders.
 const nodeTypes = { card: CardNode };
 
-type EdgeData = { onDelete: (id: string) => void };
+type EdgeData = { onDelete: (id: string) => void; hovered: boolean };
 
 /**
  * An edge you can cut. Selecting it and pressing ⌫ already worked, but nothing
@@ -53,6 +53,7 @@ function DeletableEdge({
     targetY,
     targetPosition,
   });
+  const hot = data?.hovered ?? false;
   return (
     <>
       <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
@@ -69,10 +70,17 @@ function DeletableEdge({
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             pointerEvents: "all",
           }}
-          // Always present, just quiet — EdgeLabelRenderer portals this out of
-          // the edge's own SVG group, so "show it when the edge is hovered" has
-          // no ancestor to hang off. Faint until you go for it.
-          className="nodrag nopan absolute flex h-4 w-4 items-center justify-center rounded-full border border-border bg-panel text-[9px] leading-none text-subtle opacity-30 transition-all hover:scale-125 hover:border-accent-2 hover:text-accent-2 hover:opacity-100"
+          // Fixed size, colour-only hover. It used to grow when you neared the
+          // line, which turned the thing you were aiming at into a moving
+          // target. `hovered` is tracked in React, not CSS: EdgeLabelRenderer
+          // portals this out of the edge's SVG group, so there's no ancestor
+          // for a :hover selector to reach.
+          className={[
+            "nodrag nopan absolute flex h-5 w-5 items-center justify-center rounded-full border bg-panel text-[10px] leading-none transition-colors",
+            hot
+              ? "border-accent-2 text-accent-2 opacity-100"
+              : "border-border text-subtle opacity-40",
+          ].join(" ")}
         >
           ✕
         </button>
@@ -141,6 +149,9 @@ function Canvas({
   const rf = useRef<ReactFlowInstance<CardNodeType, Edge> | null>(null);
   // Selection is view state, not document state — it must never be saved.
   const [selectedEdges, setSelectedEdges] = useState<Set<string>>(new Set());
+  // Which edge the cursor is near. React Flow reports this; CSS can't, because
+  // the delete button is portalled out of the edge's own group.
+  const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
 
   // React Flow owns node state, and positions reach the document only on drop.
   //
@@ -217,12 +228,15 @@ function Canvas({
         return {
           id: e.id,
           type: "weave" as const,
-          data: { onDelete: deleteEdge },
+          data: { onDelete: deleteEdge, hovered: hoveredEdge === e.id },
           source: e.source,
           target: e.target,
           label: e.label,
           selected: on,
           reconnectable: true,
+          // A 1.5px line is a cruel thing to ask anyone to hit. This is the
+          // invisible band around it that counts as "on the line".
+          interactionWidth: 28,
           style: {
             stroke: on ? "var(--accent)" : "var(--border-strong)",
             strokeWidth: on ? 2 : 1.5,
@@ -238,7 +252,7 @@ function Canvas({
           labelBgStyle: { fill: "var(--bg-panel)" },
         };
       }),
-    [doc.edges, selectedEdges, spotlight, deleteEdge],
+    [doc.edges, selectedEdges, spotlight, hoveredEdge, deleteEdge],
   );
 
   const onNodesChange = useCallback(
@@ -380,6 +394,8 @@ function Canvas({
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onSelectionChange={onSelectionChange}
+        onEdgeMouseEnter={(_, e) => setHoveredEdge(e.id)}
+        onEdgeMouseLeave={() => setHoveredEdge(null)}
         onInit={(inst) => {
           rf.current = inst;
         }}
