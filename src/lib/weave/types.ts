@@ -67,6 +67,11 @@ export type BoardDoc = {
   edges: WeaveEdge[];
   utterances: Utterance[];
   questions: OpenQuestion[];
+  /**
+   * Running total of what this board has cost in AI, in USD. Optional so
+   * boards written before this existed still load.
+   */
+  spend?: number;
 };
 
 export type BoardMeta = {
@@ -79,7 +84,7 @@ export type BoardMeta = {
 export type Board = BoardMeta & { doc: BoardDoc };
 
 export function emptyDoc(): BoardDoc {
-  return { cards: [], edges: [], utterances: [], questions: [] };
+  return { cards: [], edges: [], utterances: [], questions: [], spend: 0 };
 }
 
 // ── Operations ────────────────────────────────────────────────────────────

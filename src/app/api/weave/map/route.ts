@@ -8,6 +8,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { CARD_TYPES, type CardType, type Op } from "@/lib/weave/types";
+import { costOf } from "@/lib/weave/cost";
 
 export const maxDuration = 60;
 
@@ -189,6 +190,12 @@ the create list must actually contain it, complete with its title and body.`;
 
 type Body = {
   utterance: string;
+  /**
+   * Set when the speaker has hand-corrected an earlier utterance's text.
+   * These are the cards that were built from the WRONG text and now need to
+   * match the corrected version.
+   */
+  correcting?: string[];
   recent?: string[];
   cards?: {
     id: string;
@@ -202,8 +209,13 @@ type Body = {
 
 export async function POST(req: Request) {
   try {
-    const { utterance, recent = [], cards = [], edges = [] } =
-      (await req.json()) as Body;
+    const {
+      utterance,
+      correcting = [],
+      recent = [],
+      cards = [],
+      edges = [],
+    } = (await req.json()) as Body;
 
     if (!utterance || utterance.trim().length < 2) {
       return Response.json({ ops: [], reasoning: "empty" });
@@ -229,7 +241,7 @@ export async function POST(req: Request) {
         ? "(nothing yet)"
         : recent.map((r) => `- "${r}"`).join("\n");
 
-    const { object } = await generateObject({
+    const { object, usage } = await generateObject({
       model: MODEL,
       schema: ResultSchema,
       system: SYSTEM,
@@ -244,8 +256,23 @@ ${links}
 ## The few utterances just before this one (context only — already handled, do not re-card)
 ${context}
 
-## The new run of speech to map (said without pausing — read it as ONE thought)
+${
+  correcting.length
+    ? `## A CORRECTION — this is not new speech
+The speaker hand-fixed the text of something they said earlier, because it was
+transcribed wrong. The corrected text is:
 "${utterance}"
+
+These cards were built from the WRONG text: ${correcting.join(", ")}
+
+Update those cards so they match what the speaker ACTUALLY said. Do NOT create a
+duplicate alongside them. If the correction changes the meaning enough that a
+card no longer belongs, you may still update it to the new meaning — but the
+card ids above are the ones to fix, not to replace. If the corrected text is
+only a spelling or grammar fix that doesn't change the point, return nothing.`
+    : `## The new run of speech to map (said without pausing — read it as ONE thought)
+"${utterance}"`
+}
 
 Return the operations. Extract points, not sentences. Remember: all-empty is the
 most common correct answer.`,
@@ -254,6 +281,7 @@ most common correct answer.`,
     return Response.json({
       ops: flatten(object),
       reasoning: object.reasoning,
+      cost: await costOf(MODEL, usage),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Mapping failed.";

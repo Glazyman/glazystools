@@ -9,6 +9,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { CARD_TYPES, type CardType, type Op } from "@/lib/weave/types";
+import { costOf } from "@/lib/weave/cost";
 
 export const maxDuration = 120;
 
@@ -153,7 +154,7 @@ export async function POST(req: Request) {
         ? "(none)"
         : edges.map((e) => `- ${e.source} -> ${e.target}`).join("\n");
 
-    const { object } = await generateObject({
+    const { object, usage } = await generateObject({
       model: MODEL,
       schema: ResultSchema,
       system: SYSTEM,
@@ -172,6 +173,7 @@ answer.`,
     return Response.json({
       ops: flatten(object),
       summary: object.summary,
+      cost: await costOf(MODEL, usage),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Consolidation failed.";

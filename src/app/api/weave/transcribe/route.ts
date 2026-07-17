@@ -6,6 +6,7 @@
 // draft and this is the version that sticks.
 
 import { generateText } from "ai";
+import { costOf } from "@/lib/weave/cost";
 
 export const maxDuration = 60;
 
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
 
     const data = new Uint8Array(await audio.arrayBuffer());
 
-    const { text } = await generateText({
+    const { text, usage } = await generateText({
       model: MODEL,
       system: SYSTEM,
       messages: [
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
       ],
     });
 
-    return Response.json({ text: text.trim() });
+    return Response.json({ text: text.trim(), cost: await costOf(MODEL, usage) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Transcription failed.";
     return Response.json({ error: message }, { status: 500 });

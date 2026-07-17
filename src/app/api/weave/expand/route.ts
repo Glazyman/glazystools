@@ -9,6 +9,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { CARD_TYPES, type CardType, type Op } from "@/lib/weave/types";
+import { costOf } from "@/lib/weave/cost";
 
 export const maxDuration = 60;
 
@@ -112,7 +113,7 @@ export async function POST(req: Request) {
         ? "(none)"
         : edges.map((e) => `- ${e.source} -> ${e.target}`).join("\n");
 
-    const { object } = await generateObject({
+    const { object, usage } = await generateObject({
       model: MODEL,
       schema: ResultSchema,
       system: SYSTEM,
@@ -147,7 +148,7 @@ return could sit under a different card on a different map, don't return it.`,
         connectTo: [target.id],
       }));
 
-    return Response.json({ ops, summary: object.summary });
+    return Response.json({ ops, summary: object.summary, cost: await costOf(MODEL, usage) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Expand failed.";
     return Response.json({ error: message }, { status: 500 });

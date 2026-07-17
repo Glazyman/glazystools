@@ -86,6 +86,8 @@ export type UseSpeechOptions = {
   onSettled: (id: string, text: string, improved: boolean) => void;
   /** Non-fatal problems worth surfacing in the UI. */
   onError?: (message: string) => void;
+  /** USD the accuracy pass cost, once it's known. */
+  onCost?: (usd: number) => void;
 };
 
 export type UseSpeechResult = {
@@ -236,12 +238,17 @@ export function useSpeech(opts: UseSpeechOptions): UseSpeechResult {
           signal: aborter.signal,
         });
         if (res.ok) {
-          const text = readText(await res.json()).trim();
+          const json = await res.json();
+          const text = readText(json).trim();
           // Empty text isn't an improvement, it's a regression — an utterance
           // must never be blanked out by a pass that was meant to sharpen it.
           if (text) {
             best = text;
             improved = true;
+          }
+          const cost = (json as { cost?: unknown })?.cost;
+          if (typeof cost === "number" && cost > 0 && mountedRef.current) {
+            optsRef.current.onCost?.(cost);
           }
         }
       } catch {

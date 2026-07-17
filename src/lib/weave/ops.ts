@@ -34,7 +34,12 @@ export function applyOps(
 ): ApplyResult {
   // Reassignable: removeCard returns a fresh document rather than mutating.
   // The closures below read `doc` at call time, so they follow the swap.
+  //
+  // Spread `input` first. Listing only the four collections silently dropped
+  // every other field on the document — `spend` was banked and then wiped by
+  // the very next op — and would quietly eat the next field added too.
   let doc: BoardDoc = {
+    ...input,
     cards: [...input.cards],
     edges: [...input.edges],
     utterances: [...input.utterances],

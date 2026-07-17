@@ -36,6 +36,19 @@ import "./weave.css";
 const LAST_BOARD = "weave:lastBoard";
 const RAIL_OPEN = "weave:railOpen";
 const THEME = "weave:theme";
+const TALK_KEY = "weave:talkKey";
+
+/** Stored as KeyboardEvent.code — layout-independent, unlike `key`. */
+const DEFAULT_TALK_KEY = "Space";
+
+/** "KeyT" → "T", "Digit1" → "1", "ArrowUp" → "Arrow Up". */
+function keyLabel(code: string): string {
+  if (code === "Space") return "Space";
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Numpad")) return `Num ${code.slice(6)}`;
+  return code.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
 
 // ── Batching ──────────────────────────────────────────────────────────────
 //
@@ -109,6 +122,19 @@ export function Weave() {
     localStorage.setItem(THEME, next);
     setThemeOverride(next);
   }, [theme]);
+
+  // Which key toggles talking. Same SSR-safe read as the two above.
+  const talkKeyStored = useSyncExternalStore(
+    () => () => {},
+    () => localStorage.getItem(TALK_KEY) || DEFAULT_TALK_KEY,
+    () => DEFAULT_TALK_KEY,
+  );
+  const [talkKeyOverride, setTalkKeyOverride] = useState<string | null>(null);
+  const talkKey = talkKeyOverride ?? talkKeyStored;
+  const setTalkKey = useCallback((code: string) => {
+    localStorage.setItem(TALK_KEY, code);
+    setTalkKeyOverride(code);
+  }, []);
 
   // docRef is the real source of truth. Async work (a map response landing
   // seconds later) must never read a stale doc from a closure, so every
@@ -198,11 +224,25 @@ export function Weave() {
     markDirty();
   }, [markDirty]);
 
+  /**
+   * Bank what a call cost. Kept on the board rather than a global counter so
+   * the number answers "what did THIS thinking cost", which is the only
+   * version of the question worth asking.
+   */
+  const addSpend = useCallback(
+    (usd: number | null | undefined) => {
+      if (typeof usd !== "number" || !Number.isFinite(usd) || usd <= 0) return;
+      updateDoc((d) => ({ ...d, spend: (d.spend ?? 0) + usd }));
+    },
+    [updateDoc],
+  );
+
   const flashCards = useCallback((ids: string[]) => {
     if (!ids.length) return;
     setFlash(new Set(ids));
     setTimeout(() => setFlash(new Set()), 1500);
   }, []);
+
 
   /** Drop a half-built batch — it belongs to the board you just left. */
   const dropBatch = useCallback(() => {
@@ -302,7 +342,7 @@ export function Weave() {
   // ── The mapping loop ────────────────────────────────────────────────────
 
   const mapBatch = useCallback(
-    async (batch: { id: string; text: string }[]) => {
+    async (batch: { id: string; text: string }[], correcting?: string[]) => {
       if (!batch.length) return;
       // A response can land after you've switched boards; applying it then
       // would graft cards onto the wrong board.
@@ -317,6 +357,7 @@ export function Weave() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             utterance: text,
+            correcting,
             recent: d.utterances
               .filter((u) => !ids.includes(u.id))
               .slice(-4)
@@ -331,8 +372,13 @@ export function Weave() {
             edges: d.edges.map((e) => ({ source: e.source, target: e.target })),
           }),
         });
-        const json = (await res.json()) as { ops?: Op[]; error?: string };
+        const json = (await res.json()) as {
+          ops?: Op[];
+          cost?: number;
+          error?: string;
+        };
         if (json.error) throw new Error(json.error);
+        addSpend(json.cost);
         const ops = json.ops ?? [];
         if (!ops.length) return; // Filler. The overwhelmingly common case.
         if (boardIdRef.current !== boardAtCall) return;
@@ -349,7 +395,7 @@ export function Weave() {
         setMapping((m) => m - 1);
       }
     },
-    [flashCards, markDirty, pushHistory],
+    [addSpend, flashCards, markDirty, pushHistory],
   );
 
   const flush = useCallback(() => {
@@ -382,6 +428,49 @@ export function Weave() {
     [flush],
   );
 
+  /** Typed straight into the rail. Same pipeline as speech, minus the mic. */
+  const addTyped = useCallback(
+    (text: string) => {
+      const clean = text.trim();
+      if (!clean) return;
+      const id = crypto.randomUUID();
+      updateDoc((d) => ({
+        ...d,
+        utterances: [
+          ...d.utterances,
+          { id, text: clean, at: Date.now(), status: "final", cardIds: [] },
+        ],
+      }));
+      // Straight to the mapper: you typed it and pressed Enter, so there's no
+      // pause to wait for the way there is with speech.
+      void mapBatch([{ id, text: clean }]);
+    },
+    [mapBatch, updateDoc],
+  );
+
+  /**
+   * You fixed a mis-heard line. Re-map the corrected text, telling the mapper
+   * which cards came from the wrong version so it fixes them in place rather
+   * than adding a near-duplicate beside them.
+   */
+  const editUtterance = useCallback(
+    (id: string, text: string) => {
+      const clean = text.trim();
+      if (!clean) return;
+      const u = docRef.current.utterances.find((x) => x.id === id);
+      if (!u || u.text === clean) return;
+      pushHistory();
+      updateDoc((d) => ({
+        ...d,
+        utterances: d.utterances.map((x) =>
+          x.id === id ? { ...x, text: clean, status: "final" } : x,
+        ),
+      }));
+      void mapBatch([{ id, text: clean }], u.cardIds);
+    },
+    [mapBatch, pushHistory, updateDoc],
+  );
+
 
   const speech = useSpeech({
     onInterim: setInterim,
@@ -410,6 +499,7 @@ export function Weave() {
       queue(id, text);
     },
     onError: setError,
+    onCost: addSpend,
   });
 
   // ── Hotkeys ─────────────────────────────────────────────────────────────
@@ -419,10 +509,12 @@ export function Weave() {
   const toggleRef = useRef(speech.toggle);
   const undoRef = useRef(undo);
   const redoRef = useRef(redo);
+  const talkKeyRef = useRef(talkKey);
   useEffect(() => {
     toggleRef.current = speech.toggle;
     undoRef.current = undo;
     redoRef.current = redo;
+    talkKeyRef.current = talkKey;
   });
 
   useEffect(() => {
@@ -435,8 +527,9 @@ export function Weave() {
           t.isContentEditable);
       if (typing) return;
 
-      if (e.code === "Space" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        // Space also scrolls the page — always ours here.
+      if (e.code === talkKeyRef.current && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // Space would otherwise scroll the page — and whatever it's bound to,
+        // the key is ours once you're on the board and not typing.
         e.preventDefault();
         toggleRef.current();
       }
@@ -450,16 +543,12 @@ export function Weave() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Session length, from the first thing you said.
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 15000);
-    return () => clearInterval(t);
-  }, []);
-  const minutes = useMemo(() => {
-    const first = doc.utterances[0]?.at;
-    if (!first) return 0;
-    return Math.max(0, Math.round((now - first) / 60000));
-  }, [doc.utterances, now]);
+  /** Sub-tenth-of-a-cent is true but useless; say so rather than show $0.000. */
+  const spendLabel = useMemo(() => {
+    const s = doc.spend ?? 0;
+    if (s <= 0) return null;
+    return s < 0.001 ? "<$0.001" : `$${s.toFixed(3)}`;
+  }, [doc.spend]);
 
   useEffect(() => {
     if (!notice) return;
@@ -564,9 +653,11 @@ export function Weave() {
         const json = (await res.json()) as {
           ops?: Op[];
           summary?: string;
+          cost?: number;
           error?: string;
         };
         if (json.error) throw new Error(json.error);
+        addSpend(json.cost);
         const ops = json.ops ?? [];
         if (!ops.length) {
           setNotice("Nothing worth adding there.");
@@ -590,7 +681,7 @@ export function Weave() {
         });
       }
     },
-    [flashCards, markDirty, pushHistory],
+    [addSpend, flashCards, markDirty, pushHistory],
   );
 
   const answerQuestion = useCallback(
@@ -649,9 +740,11 @@ export function Weave() {
       const json = (await res.json()) as {
         ops?: Op[];
         summary?: string;
+        cost?: number;
         error?: string;
       };
       if (json.error) throw new Error(json.error);
+      addSpend(json.cost);
       const ops = json.ops ?? [];
       if (ops.length) {
         pushHistory();
@@ -752,13 +845,6 @@ export function Weave() {
           {listening ? "Stop" : "Talk"}
         </button>
 
-        <span className="font-mono text-[10px] text-subtle">
-          tap{" "}
-          <kbd className="rounded border border-border bg-elevated px-1 py-0.5 text-[10px] text-muted">
-            Space
-          </kbd>
-        </span>
-
         {busy && (
           <span className="font-mono text-[10px] text-accent">mapping…</span>
         )}
@@ -778,9 +864,12 @@ export function Weave() {
               {selection.length} selected · ⌫ deletes
             </span>
           )}
-          <span className="font-mono text-[10px] text-subtle">
+          <span
+            className="font-mono text-[10px] text-subtle"
+            title={spendLabel ? "What this board has cost you in AI" : undefined}
+          >
             {doc.cards.length} card{doc.cards.length === 1 ? "" : "s"}
-            {minutes > 0 && ` · ${minutes} min`}
+            {spendLabel && ` · ${spendLabel}`}
           </span>
 
           <div className="mx-1 h-5 w-px bg-border" />
@@ -825,6 +914,7 @@ export function Weave() {
           >
             {theme === "light" ? "☾" : "☀"}
           </TB>
+          <SettingsMenu talkKey={talkKey} onTalkKey={setTalkKey} />
 
           <span
             className="ml-1 font-mono text-[10px]"
@@ -874,6 +964,8 @@ export function Weave() {
             level={speech.level}
             onSpotlight={(ids) => setSpotlight(ids ? new Set(ids) : null)}
             onClose={toggleRail}
+            onSubmitText={addTyped}
+            onEditUtterance={editUtterance}
             onDismissQuestion={(id) =>
               updateDoc((d) => ({
                 ...d,
@@ -1008,6 +1100,78 @@ function useMenu() {
     };
   }, [close]);
   return { ref, close };
+}
+
+function SettingsMenu({
+  talkKey,
+  onTalkKey,
+}: {
+  talkKey: string;
+  onTalkKey: (code: string) => void;
+}) {
+  const { ref } = useMenu();
+  const [capturing, setCapturing] = useState(false);
+
+  // While capturing, the next key you press becomes the binding — so this
+  // listener has to outrank every other hotkey on the page, including the
+  // current talk key itself. Capture phase + stopPropagation does that.
+  useEffect(() => {
+    if (!capturing) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setCapturing(false);
+      // A bare modifier can't be a binding — it never arrives on its own.
+      if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
+      if (e.key === "Escape") return; // Escape means "never mind"
+      onTalkKey(e.code);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [capturing, onTalkKey]);
+
+  return (
+    <details ref={ref} className="relative">
+      <summary
+        title="Settings"
+        className="cursor-pointer list-none rounded-md border border-border px-2 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg"
+      >
+        ⚙
+      </summary>
+      <div className="absolute right-0 z-20 mt-1 w-64 overflow-hidden rounded-[10px] border border-border bg-panel p-3 shadow-card">
+        <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-subtle">
+          Settings
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs text-fg">Talk key</div>
+            <div className="mt-0.5 text-[11px] leading-snug text-subtle">
+              Tap once to start, again to stop.
+            </div>
+          </div>
+          <button
+            onClick={() => setCapturing((c) => !c)}
+            className={[
+              "shrink-0 rounded-md border px-2.5 py-1 font-mono text-[11px] transition-colors",
+              capturing
+                ? "animate-pulse border-accent text-accent"
+                : "border-border-strong text-fg hover:bg-hover",
+            ].join(" ")}
+          >
+            {capturing ? "Press a key…" : keyLabel(talkKey)}
+          </button>
+        </div>
+        {talkKey !== DEFAULT_TALK_KEY && (
+          <button
+            onClick={() => onTalkKey(DEFAULT_TALK_KEY)}
+            className="mt-2.5 font-mono text-[10px] uppercase tracking-wider text-subtle transition-colors hover:text-fg"
+          >
+            Reset to Space
+          </button>
+        )}
+      </div>
+    </details>
+  );
 }
 
 function ExportMenu({ onExport }: { onExport: (kind: "md" | "json") => void }) {

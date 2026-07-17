@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OpenQuestion, Utterance } from "@/lib/weave/types";
 
 export type TranscriptRailProps = {
@@ -13,6 +13,10 @@ export type TranscriptRailProps = {
   level: number;
   onSpotlight: (cardIds: string[] | null) => void;
   onClose: () => void;
+  /** Typed instead of spoken. */
+  onSubmitText: (text: string) => void;
+  /** Corrected a mis-heard line — the cards it made get fixed to match. */
+  onEditUtterance: (id: string, text: string) => void;
   onDismissQuestion: (id: string) => void;
   onAnswerQuestion: (q: OpenQuestion) => void;
 };
@@ -25,10 +29,19 @@ export function TranscriptRail({
   level,
   onSpotlight,
   onClose,
+  onSubmitText,
+  onEditUtterance,
   onDismissQuestion,
   onAnswerQuestion,
 }: TranscriptRailProps) {
   const endRef = useRef<HTMLDivElement>(null);
+  const [typed, setTyped] = useState("");
+  // Only ever one line under edit; null means none. Same shape as CardNode's
+  // draft, and for the same reason: nothing to re-sync when the text changes
+  // underneath.
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(
+    null,
+  );
 
   // Follow the conversation as it grows.
   useEffect(() => {
@@ -77,39 +90,73 @@ export function TranscriptRail({
           </p>
         ) : (
           <div className="space-y-2">
-            {utterances.map((u) => (
-              <button
-                key={u.id}
-                onMouseEnter={() =>
-                  onSpotlight(u.cardIds.length ? u.cardIds : null)
-                }
-                onMouseLeave={() => onSpotlight(null)}
-                className={[
-                  "w-full rounded-[10px] border px-3 py-2 text-left transition-colors",
-                  u.cardIds.length
-                    ? "border-border-strong bg-elevated hover:border-accent"
-                    : // Filler that produced nothing — visibly lesser, so the
-                      // rail reads as a record rather than a list of failures.
-                      "border-border bg-transparent opacity-50 hover:opacity-80",
-                ].join(" ")}
-              >
-                <p className="text-xs leading-relaxed text-fg">
-                  &ldquo;{u.text}&rdquo;
-                </p>
-                <div className="mt-1.5 flex items-center gap-2">
-                  {u.status === "refining" && (
-                    <span className="font-mono text-[9px] uppercase tracking-wider text-subtle">
-                      sharpening…
-                    </span>
-                  )}
-                  {u.cardIds.length > 0 && (
-                    <span className="font-mono text-[9px] uppercase tracking-wider text-accent">
-                      {u.cardIds.length} card{u.cardIds.length > 1 ? "s" : ""}
-                    </span>
-                  )}
+            {utterances.map((u) =>
+              editing?.id === u.id ? (
+                <div
+                  key={u.id}
+                  className="rounded-[10px] border border-accent bg-elevated px-2 py-1.5"
+                >
+                  <textarea
+                    autoFocus
+                    value={editing.text}
+                    onChange={(e) =>
+                      setEditing({ id: u.id, text: e.target.value })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        onEditUtterance(u.id, editing.text);
+                        setEditing(null);
+                      }
+                      if (e.key === "Escape") setEditing(null);
+                    }}
+                    onBlur={() => {
+                      onEditUtterance(u.id, editing.text);
+                      setEditing(null);
+                    }}
+                    rows={3}
+                    className="w-full resize-none bg-transparent text-xs leading-relaxed text-fg outline-none"
+                  />
+                  <div className="font-mono text-[9px] uppercase tracking-wider text-subtle">
+                    ↵ to fix its cards · esc to cancel
+                  </div>
                 </div>
-              </button>
-            ))}
+              ) : (
+                <button
+                  key={u.id}
+                  onMouseEnter={() =>
+                    onSpotlight(u.cardIds.length ? u.cardIds : null)
+                  }
+                  onMouseLeave={() => onSpotlight(null)}
+                  onDoubleClick={() => setEditing({ id: u.id, text: u.text })}
+                  title="Double-click to fix what it heard"
+                  className={[
+                    "w-full rounded-[10px] border px-3 py-2 text-left transition-colors",
+                    u.cardIds.length
+                      ? "border-border-strong bg-elevated hover:border-accent"
+                      : // Filler that produced nothing — visibly lesser, so the
+                        // rail reads as a record rather than a list of failures.
+                        "border-border bg-transparent opacity-50 hover:opacity-80",
+                  ].join(" ")}
+                >
+                  <p className="text-xs leading-relaxed text-fg">
+                    &ldquo;{u.text}&rdquo;
+                  </p>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    {u.status === "refining" && (
+                      <span className="font-mono text-[9px] uppercase tracking-wider text-subtle">
+                        sharpening…
+                      </span>
+                    )}
+                    {u.cardIds.length > 0 && (
+                      <span className="font-mono text-[9px] uppercase tracking-wider text-accent">
+                        {u.cardIds.length} card{u.cardIds.length > 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ),
+            )}
 
             {interim && (
               <div className="rounded-[10px] border border-dashed border-border-strong px-3 py-2">
@@ -122,6 +169,25 @@ export function TranscriptRail({
           </div>
         )}
         <div ref={endRef} />
+      </div>
+
+      {/* Type instead of talk — same pipeline, no mic. Useful when you can't
+          speak, and when the mic keeps mangling a particular word. */}
+      <div className="border-t border-border px-4 py-3">
+        <textarea
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSubmitText(typed);
+              setTyped("");
+            }
+          }}
+          rows={2}
+          placeholder="…or type it. ↵ to map, ⇧↵ for a new line."
+          className="w-full resize-none rounded-[10px] border border-border bg-elevated px-3 py-2 text-xs leading-relaxed text-fg outline-none transition-colors placeholder:text-subtle focus:border-border-strong"
+        />
       </div>
 
       <div className="border-t border-border px-4 py-3">
