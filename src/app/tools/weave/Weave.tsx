@@ -30,6 +30,7 @@ import {
 } from "@/lib/weave/types";
 import { Board, type BoardApi } from "./Board";
 import { CardMenu, type CardMenuState } from "./CardMenu";
+import { Lightbox, type LightboxState } from "./Lightbox";
 import { deleteAttachment, uploadAttachment } from "@/lib/weave/attachments";
 import { TranscriptRail } from "./TranscriptRail";
 import { useSpeech } from "./useSpeech";
@@ -105,6 +106,7 @@ export function Weave() {
   const [expanding, setExpanding] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(0);
   const [menu, setMenu] = useState<CardMenuState | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   const [selection, setSelection] = useState<string[]>([]);
   const [mapping, setMapping] = useState(0);
   const [consolidating, setConsolidating] = useState(false);
@@ -741,9 +743,37 @@ export function Weave() {
     [pushHistory, updateDoc],
   );
 
-  const openFile = useCallback((url: string) => {
-    window.open(url, "_blank", "noopener,noreferrer");
+  /** Open the viewer on the board rather than throwing you into a new tab. */
+  const openFile = useCallback((cardId: string, index: number) => {
+    const card = docRef.current.cards.find((c) => c.id === cardId);
+    if (!card?.attachments?.length) return;
+    setLightbox({ cardId, items: card.attachments, at: index });
   }, []);
+
+  /** Remove a file from a card, and from the bucket. */
+  const removeAttachment = useCallback(
+    (cardId: string, path: string) => {
+      void deleteAttachment(path);
+      pushHistory();
+      updateDoc((d) => ({
+        ...d,
+        cards: d.cards.map((c) =>
+          c.id === cardId
+            ? { ...c, attachments: (c.attachments ?? []).filter((a) => a.path !== path) }
+            : c,
+        ),
+      }));
+      // Keep the viewer honest about what's left: close on the last one, and
+      // don't leave `at` pointing past the end.
+      setLightbox((lb) => {
+        if (!lb || lb.cardId !== cardId) return lb;
+        const items = lb.items.filter((a) => a.path !== path);
+        if (!items.length) return null;
+        return { ...lb, items, at: Math.min(lb.at, items.length - 1) };
+      });
+    },
+    [pushHistory, updateDoc],
+  );
 
   /**
    * Attach a file. One hidden <input type=file> is reused for every card —
@@ -1203,6 +1233,15 @@ export function Weave() {
           ) : null}
         </div>
       </div>
+
+      {lightbox && (
+        <Lightbox
+          state={lightbox}
+          onClose={() => setLightbox(null)}
+          onMove={(at) => setLightbox((lb) => (lb ? { ...lb, at } : lb))}
+          onDelete={removeAttachment}
+        />
+      )}
 
       {menu && (
         <CardMenu

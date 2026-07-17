@@ -34,7 +34,8 @@ export type CardNodeData = {
   onCycleType: (id: string) => void;
   onExpand: (id: string) => void;
   onDelete: (id: string) => void;
-  onOpenFile: (url: string) => void;
+  /** Which card, and which of its attachments you clicked. */
+  onOpenFile: (cardId: string, index: number) => void;
 };
 
 export type CardNodeType = FlowNode<CardNodeData, "card">;
@@ -111,20 +112,24 @@ function Attachments({
   onOpen,
 }: {
   items: Attachment[];
-  onOpen: (url: string) => void;
+  /** Index into `items` — the viewer pages through them all. */
+  onOpen: (index: number) => void;
 }) {
-  const images = items.filter(isImage);
-  const files = items.filter((a) => !isImage(a));
+  // Keep each one's real index: the viewer pages across images AND files, so a
+  // position in a filtered list would open the wrong thing.
+  const withIndex = items.map((a, i) => ({ a, i }));
+  const images = withIndex.filter(({ a }) => isImage(a));
+  const files = withIndex.filter(({ a }) => !isImage(a));
   return (
     <div className="nodrag mt-2.5 space-y-1.5">
       {images.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {images.map((a) => (
+          {images.map(({ a, i }) => (
             <button
               key={a.path}
               onClick={(e) => {
                 e.stopPropagation();
-                onOpen(a.url);
+                onOpen(i);
               }}
               title={a.name}
               className="overflow-hidden rounded-md border border-border transition-opacity hover:opacity-80"
@@ -142,12 +147,12 @@ function Attachments({
           ))}
         </div>
       )}
-      {files.map((a) => (
+      {files.map(({ a, i }) => (
         <button
           key={a.path}
           onClick={(e) => {
             e.stopPropagation();
-            onOpen(a.url);
+            onOpen(i);
           }}
           title={a.name}
           className="flex w-full items-center gap-1.5 rounded-md border border-border px-2 py-1 text-left transition-colors hover:bg-hover"
@@ -319,7 +324,10 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
               <Chart points={card.chart} color={color} />
             )}
             {card.attachments && card.attachments.length > 0 && (
-              <Attachments items={card.attachments} onOpen={onOpenFile} />
+              <Attachments
+                items={card.attachments}
+                onOpen={(i) => onOpenFile(card.id, i)}
+              />
             )}
           </>
         )}

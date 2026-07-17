@@ -108,7 +108,7 @@ export type BoardProps = {
   onCycleType: (id: string) => void;
   onExpand: (id: string) => void;
   onDelete: (id: string) => void;
-  onOpenFile: (url: string) => void;
+  onOpenFile: (cardId: string, index: number) => void;
   /** Right-clicked a card — Weave owns the menu. */
   onCardContextMenu: (card: CardNodeType["data"]["card"], x: number, y: number) => void;
   /** Hands Weave an imperative handle once the canvas is live. */
