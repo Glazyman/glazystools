@@ -63,6 +63,10 @@ sidebar listing other tools is noise inside an app that IS one tool. Built the
 Desk Notes way: Objective-C + clang + ad-hoc codesign, no Xcode.
 
 Things that would otherwise cost an hour each:
+- **WKWebView ignores `<input type=file>` entirely** without
+  `runOpenPanelWithParameters` — the click lands, the page never hears back,
+  and "Attach photo" looks like a dead button. Chrome has a picker built in; a
+  bare web view has nothing.
 - **WKWebView denies `getUserMedia` silently** — the page just sees a mic that
   never works. `requestMediaCapturePermissionForOrigin` is what actually grants
   it; `NSMicrophoneUsageDescription` only drives macOS's own prompt.
