@@ -31,45 +31,54 @@ const ResultSchema = z.object({
     .describe("2-4 cards. Fewer and better beats more."),
 });
 
-const SYSTEM = `You expand one node on someone's thought-map.
+const SYSTEM = `You suggest the next cards that follow from ONE card on
+someone's thought-map.
 
-You are given ONE card and the entire board around it. Your job is to surface
-what this card IMPLIES but nobody has written down yet: the sub-questions it
-raises, the options it forces a choice between, and the risks it carries.
+## THE CARD IS THE SUBJECT
 
-## What good looks like
+Everything you return must follow from what THAT CARD says — from its title and
+body, and nothing else. Not from the board's most recent addition, not from
+whatever the person was last talking about, not from the board's general theme.
 
-Return 2-4 cards. Three is usually right. Fewer and sharper always beats more.
+If the card reads "Build an API for Placeit", every card you return is about
+building that API. If it reads "USPTO backlog is 18 months", every card you
+return is about that delay. Read the card. Work from the card.
+
+The rest of the board is CONTEXT ONLY, for two things: not repeating what's
+already there, and not contradicting a decision already made. It is never the
+topic. Drifting from the card to the board's general subject is the main way to
+fail here.
+
+## What to return
+
+2-4 cards — three is usually right. These are SUGGESTED NEXT CARDS: what this
+card makes necessary, possible, or risky. Where the thinking goes from here.
 
 Aim for a MIX rather than four of the same flavour:
-- question — the thing that must be answered before this can proceed
-- idea     — a concrete option or approach this opens up
-- fact     — a constraint or reality this runs into
-- action   — the specific next step this demands
-- decision — a fork that has to be chosen between
+- action   — the concrete next step this card demands
+- question — what has to be answered before this can proceed
+- idea     — a concrete option or approach this card opens up
+- fact     — a constraint or reality this card runs into
+- decision — a fork this card forces
 
 ## The bar
 
-Every card must be SPECIFIC TO THIS BOARD. The test: could this sentence appear
-on someone else's map about a different project? If yes, it's worthless — delete
-it. "Consider the costs", "Validate with users", "Think about scalability" are
-noise. "Patent attorneys cost $8-15k per filing, which kills the price point"
-is a real card.
-
-Use the rest of the board. The other cards tell you what this person is actually
-building, what they've already decided, and what they already know — a card that
-restates something already on the board is wasted, and a card that contradicts a
-decision they've made is worse.
+Every card must be SPECIFIC TO THIS CARD. The test: could this sentence sit
+under a different card, on a different map? If yes it's worthless — cut it.
+"Consider the costs", "Validate with users", "Think about scalability" are
+noise. Under "Build an API for Placeit", a real card is "Placeit's ToS may
+forbid scraping".
 
 Be concrete and be short. You are adding to a map someone is thinking on, not
 writing them a consulting report.
 
 ## Do not
 
+- Do not drift to the board's general topic. Stay on THIS card.
 - Do not repeat or reword anything already on the board.
 - Do not pad to reach four. Two excellent cards is a great answer.
 - Do not hedge. "It might be worth possibly considering" is not a thought.
-- Do not ask questions the speaker has visibly already answered elsewhere.`;
+- Do not ask what the person has visibly already answered elsewhere.`;
 
 type Body = {
   cardId?: string;
@@ -110,17 +119,20 @@ export async function POST(req: Request) {
       system: SYSTEM,
       temperature: 0.7, // higher than the mapper: here we want range, not caution
       maxRetries: 4,
-      prompt: `## The card to expand
-[${target.type}] "${target.title}" — ${target.body}
+      prompt: `## THE CARD — this and only this is what you are expanding
+[${target.type}] "${target.title}"
+${target.body}
 
-## The whole board it sits in
+## The rest of the board — context only, NOT the topic
+Use it solely to avoid repeating or contradicting what's already here.
 ${board}
 
 ## Connections
 ${links}
 
-Surface what this card implies but nobody has said yet. Specific to THIS board —
-if a card could appear on someone else's map, it doesn't belong on this one.`,
+Suggest the next cards that follow from THE CARD above: what it makes necessary,
+possible, or risky. Work from that card's own words. If a card you're about to
+return could sit under a different card on a different map, don't return it.`,
     });
 
     // Everything hangs off the card being expanded; that's what makes it an

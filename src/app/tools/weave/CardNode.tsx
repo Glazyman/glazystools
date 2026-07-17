@@ -29,6 +29,7 @@ export type CardNodeData = {
   onCommit: (id: string, patch: { title: string; body: string }) => void;
   onCycleType: (id: string) => void;
   onExpand: (id: string) => void;
+  onDelete: (id: string) => void;
 };
 
 export type CardNodeType = FlowNode<CardNodeData, "card">;
@@ -43,6 +44,7 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
     onCommit,
     onCycleType,
     onExpand,
+    onDelete,
   } = data;
   // The draft exists only while editing. Keeping no mirrored copy of the card
   // means there's nothing to re-sync when the mapper rewrites this card
@@ -87,6 +89,20 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
         style={{ background: color }}
       />
 
+      {/* Delete — a badge on the corner, revealed on hover. Deliberately
+          outside the card's own padding so it never competes with the text. */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(card.id);
+        }}
+        title="Delete card"
+        className="nodrag absolute -left-2.5 -top-2.5 z-10 flex h-5 w-5 items-center justify-center rounded-full text-[11px] leading-none text-white opacity-0 shadow-card transition-opacity group-hover:opacity-100 hover:brightness-110"
+        style={{ background: "var(--accent-2)" }}
+      >
+        ✕
+      </button>
+
       <Handle
         type="target"
         position={Position.Left}
@@ -108,35 +124,14 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
           >
             {card.type}
           </button>
-          <div className="flex items-center gap-2">
-            {card.pinned && (
-              <span
-                title="You edited this — the AI won't rewrite it"
-                className="font-mono text-[9px] uppercase tracking-wider text-subtle"
-              >
-                pinned
-              </span>
-            )}
-            {/* Reveal on hover: this is a deliberate act, not something to
-                fire by accident while dragging cards around. */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onExpand(card.id);
-              }}
-              disabled={expanding}
-              title="Expand — ask the AI for the sub-questions, options, and risks this implies"
-              className={[
-                "nodrag font-mono text-[10px] transition-opacity",
-                expanding
-                  ? "animate-pulse opacity-100"
-                  : "opacity-0 group-hover:opacity-100",
-              ].join(" ")}
-              style={{ color }}
+          {card.pinned && (
+            <span
+              title="You edited this — the AI won't rewrite it"
+              className="font-mono text-[9px] uppercase tracking-wider text-subtle"
             >
-              {expanding ? "···" : "✦"}
-            </button>
-          </div>
+              pinned
+            </span>
+          )}
         </div>
 
         {draft ? (
@@ -208,6 +203,27 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
           <span className="font-mono text-[10px] text-subtle">
             {Math.round(card.confidence * 100)}%
           </span>
+
+          {/* Suggest next cards off this one. Reveal on hover — a deliberate
+              act, not something to fire by accident while dragging. */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onExpand(card.id);
+            }}
+            disabled={expanding}
+            title="Suggest next steps from this card"
+            className={[
+              "nodrag flex h-4 w-4 items-center justify-center rounded font-mono text-[11px] leading-none transition-opacity",
+              expanding
+                ? "animate-pulse opacity-100"
+                : "opacity-0 group-hover:opacity-100 hover:bg-hover",
+            ].join(" ")}
+            style={{ color }}
+          >
+            {expanding ? "·" : "+"}
+          </button>
+
           {linkCount > 0 && (
             <span className="ml-auto font-mono text-[10px] text-subtle">
               ⇄ {linkCount}

@@ -87,17 +87,37 @@ restatement → still 0; pure filler → still 0. **Lesson: batching trades a
 per-sentence prompt for a per-run one, and the run prompt must be explicit that
 runs are heterogeneous.**
 
-**Expand a node** (`✦` on card hover → `/api/weave/expand`). The mapper only
-reacts to what you said; expand reads ONE card against the whole board and
-surfaces what the map *implies* but nobody has spoken — sub-questions, options,
-risks. 2-4 cards, all `connectTo` the source. `temperature: 0.7` (vs the
-mapper's 0.2 — here we want range, not caution). The prompt's whole job is
-killing generic filler: the test is "could this sentence appear on someone
-else's map?" — if yes it's noise. It works: expanding "build an app to simplify
-patenting" on a board that also held "ship MVP without the API / manual upload"
-produced *"Manual upload vs. 'fast' promise"* — it caught the contradiction
-BETWEEN two cards. That cross-card reasoning is the feature. On a button, never
-automatic: it's the one place Weave has ideas of its own.
+**⚠️ Drag perf — the controlled React Flow trap.** The obvious pattern (derive
+`nodes` from `doc.cards`, write every `position` change straight back) re-renders
+the ENTIRE app on every frame of a drag: new doc → Weave re-renders → the rail
+re-renders → every card's `data` object is rebuilt → RF re-renders all nodes. At
+60fps that's what made dragging lurch and the board flicker/white-out when moving
+over other cards. Fix: `useNodesState` owns node state, `onNodesChangeRF` handles
+moves internally, and positions reach the document ONLY in `onNodeDragStop`
+(which gets the `moved[]` array, so multi-select drags commit too). The
+doc→nodes sync effect early-returns while `dragging.current` — otherwise an
+utterance landing mid-drag snaps the card back to the position the doc still
+remembers. Selection moved to RF's `onSelectionChange`.
+
+**Expand a node** (`+` on the card's footer by the confidence % →
+`/api/weave/expand`). Suggested next cards: what this card makes necessary,
+possible, or risky. 2-4 cards, all `connectTo` the source. `temperature: 0.7`
+(vs the mapper's 0.2 — here we want range, not caution). **THE CARD IS THE
+SUBJECT** — the prompt hammers this, because the failure mode is drifting to the
+board's general topic instead of the card you clicked (verified: expanding the
+Placeit-API card on a mostly-patents board returned three API cards incl.
+"Placeit's ToS may forbid scraping", zero patent drift). The board is context
+ONLY, for not repeating and not contradicting. The other half of the prompt
+kills generic filler: "could this sentence sit under a different card on a
+different map?" → if yes it's noise. It reads across cards when that's what the
+card implies — expanding "simplify patenting" on a board holding "ship MVP
+without the API" surfaced *"Manual upload vs. 'fast' promise"*, the
+contradiction between them. On a button, never automatic: the one place Weave
+has ideas of its own.
+
+**Delete** — red `✕` badge on the card's top-left corner, revealed on hover
+(matches Weave's own). No confirm: undo is a better answer than a dialog on
+every card. `⌫` on a selection still works too.
 
 **`+ Card`** — manual card at the viewport centre, born `pinned:true` (you wrote
 it, the mapper must not rewrite it). Needs `screenToFlowPosition`, so `Board`

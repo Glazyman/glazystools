@@ -7,6 +7,7 @@ import {
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  useNodesState,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -38,6 +39,7 @@ export type BoardProps = {
   onCommitCard: (id: string, patch: { title: string; body: string }) => void;
   onCycleType: (id: string) => void;
   onExpand: (id: string) => void;
+  onDelete: (id: string) => void;
   /** Hands Weave an imperative handle once the canvas is live. */
   onApi: (api: BoardApi) => void;
 };
@@ -68,6 +70,7 @@ function Canvas({
   onCommitCard,
   onCycleType,
   onExpand,
+  onDelete,
   onApi,
 }: BoardProps) {
   const wrapper = useRef<HTMLDivElement>(null);
@@ -77,8 +80,17 @@ function Canvas({
   // is genuinely live, and drive the buttons off that.
   const rf = useRef<ReactFlowInstance<CardNodeType, Edge> | null>(null);
   // Selection is view state, not document state — it must never be saved.
-  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
   const [selectedEdges, setSelectedEdges] = useState<Set<string>>(new Set());
+
+  // React Flow owns node state, and positions reach the document only on drop.
+  //
+  // The obvious controlled version — derive `nodes` from doc.cards and write
+  // every position change straight back — re-renders the whole app on every
+  // frame of a drag: new doc → Weave re-renders → the rail re-renders → every
+  // card's `data` object is rebuilt → React Flow re-renders all nodes. At 60fps
+  // that's what made dragging lurch and the board flicker.
+  const [nodes, setNodes, onNodesChangeRF] = useNodesState<CardNodeType>([]);
+  const dragging = useRef(false);
 
   const linkCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -89,13 +101,18 @@ function Canvas({
     return m;
   }, [doc.edges]);
 
-  const nodes: CardNodeType[] = useMemo(
-    () =>
-      doc.cards.map((card) => ({
+  // Rebuild nodes when the document changes — but never mid-drag, or an
+  // utterance landing while you're moving a card would snap it back to the
+  // position the document still remembers.
+  useEffect(() => {
+    if (dragging.current) return;
+    setNodes((prev) => {
+      const wasSelected = new Map(prev.map((n) => [n.id, n.selected]));
+      return doc.cards.map((card) => ({
         id: card.id,
         type: "card" as const,
         position: { x: card.x, y: card.y },
-        selected: selectedNodes.has(card.id),
+        selected: wasSelected.get(card.id) ?? false,
         data: {
           card,
           flash: flash.has(card.id),
@@ -105,20 +122,22 @@ function Canvas({
           onCommit: onCommitCard,
           onCycleType,
           onExpand,
+          onDelete,
         },
-      })),
-    [
-      doc.cards,
-      flash,
-      spotlight,
-      expanding,
-      linkCounts,
-      selectedNodes,
-      onCommitCard,
-      onCycleType,
-      onExpand,
-    ],
-  );
+      }));
+    });
+  }, [
+    doc.cards,
+    flash,
+    spotlight,
+    expanding,
+    linkCounts,
+    onCommitCard,
+    onCycleType,
+    onExpand,
+    onDelete,
+    setNodes,
+  ]);
 
   const edges: Edge[] = useMemo(
     () =>
@@ -154,30 +173,44 @@ function Canvas({
 
   const onNodesChange = useCallback(
     (changes: NodeChange<CardNodeType>[]) => {
+      // Let React Flow move things first — this is the cheap, internal path
+      // that keeps a drag at 60fps.
+      onNodesChangeRF(changes);
       for (const ch of changes) {
-        if (ch.type === "select") {
-          setSelectedNodes((prev) => {
-            const next = new Set(prev);
-            if (ch.selected) next.add(ch.id);
-            else next.delete(ch.id);
-            onSelect([...next]);
-            return next;
-          });
-        } else if (ch.type === "position" && ch.position) {
-          const { id, position } = ch;
-          onDoc((d) => ({
-            ...d,
-            cards: d.cards.map((c) =>
-              c.id === id ? { ...c, x: position.x, y: position.y } : c,
-            ),
-          }));
-        } else if (ch.type === "remove") {
+        if (ch.type === "remove") {
           onHistory();
           onDoc((d) => removeCard(d, ch.id));
         }
       }
     },
-    [onDoc, onHistory, onSelect],
+    [onNodesChangeRF, onDoc, onHistory],
+  );
+
+  const onNodeDragStart = useCallback(() => {
+    dragging.current = true;
+    onHistory();
+  }, [onHistory]);
+
+  /** The one place a drag reaches the document. `moved` covers multi-select. */
+  const onNodeDragStop = useCallback(
+    (_e: unknown, _node: CardNodeType, moved: CardNodeType[]) => {
+      dragging.current = false;
+      if (!moved.length) return;
+      const at = new Map(moved.map((n) => [n.id, n.position]));
+      onDoc((d) => ({
+        ...d,
+        cards: d.cards.map((c) => {
+          const p = at.get(c.id);
+          return p ? { ...c, x: p.x, y: p.y } : c;
+        }),
+      }));
+    },
+    [onDoc],
+  );
+
+  const onSelectionChange = useCallback(
+    ({ nodes: sel }: { nodes: CardNodeType[] }) => onSelect(sel.map((n) => n.id)),
+    [onSelect],
   );
 
   const onEdgesChange = useCallback(
@@ -273,7 +306,9 @@ function Canvas({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onReconnect={onReconnect}
-        onNodeDragStart={onHistory}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
+        onSelectionChange={onSelectionChange}
         onInit={(inst) => {
           rf.current = inst;
         }}

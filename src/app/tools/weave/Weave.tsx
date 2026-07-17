@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { CARD_H, CARD_W, freeSpotNear, tidy } from "@/lib/weave/layout";
-import { applyOps } from "@/lib/weave/ops";
+import { applyOps, removeCard } from "@/lib/weave/ops";
 import {
   createBoard,
   deleteBoard,
@@ -532,6 +532,15 @@ export function Weave() {
     flashCards([card.id]);
   }, [flashCards, pushHistory, updateDoc]);
 
+  /** No confirm — undo (⌘Z) is a better answer than a dialog on every card. */
+  const deleteCard = useCallback(
+    (id: string) => {
+      pushHistory();
+      updateDoc((d) => removeCard(d, id));
+    },
+    [pushHistory, updateDoc],
+  );
+
   /** Ask the AI what this card implies but nobody has said yet. */
   const expandCard = useCallback(
     async (id: string) => {
@@ -905,6 +914,7 @@ export function Weave() {
                 onCommitCard={onCommitCard}
                 onCycleType={onCycleType}
                 onExpand={expandCard}
+                onDelete={deleteCard}
                 onApi={handleApi}
               />
               {doc.cards.length === 0 && (
