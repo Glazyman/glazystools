@@ -25,8 +25,10 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setNavOpen(false), [pathname]);
 
-  // The login page is standalone — no sidebar/top bar chrome.
-  if (pathname === "/login") return <>{children}</>;
+  // Standalone routes get no chrome at all: the login page, and the bare
+  // single-tool routes the desktop apps load (/weave), where a sidebar full of
+  // other tools would be noise inside an app that IS one tool.
+  if (pathname === "/login" || pathname === "/weave") return <>{children}</>;
 
   return (
     <div className="flex h-dvh w-full overflow-hidden">
