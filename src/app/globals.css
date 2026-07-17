@@ -214,6 +214,18 @@ body {
   background: var(--fg-subtle);
 }
 
+/* <details> chevrons: point down when closed, up when open.
+   Tailwind's `group-open:` variant emits nothing in this build — there isn't a
+   single rotate-180 rule in the output — so every chevron using it was silently
+   never rotating. A plain rule always works, and works in server components
+   where a state-driven flip can't. */
+.chevron {
+  transition: transform 150ms ease;
+}
+details[open] > summary .chevron {
+  transform: rotate(180deg);
+}
+
 /* Subtle dotted grid used behind empty states */
 .grid-bg {
   background-image: radial-gradient(var(--border) 1px, transparent 1px);

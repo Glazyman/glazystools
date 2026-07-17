@@ -44,9 +44,7 @@ export function ToolPage({
                 <h1 className="text-lg font-semibold tracking-tight">
                   {tool.name}
                 </h1>
-                <span className="text-subtle transition-transform group-open:rotate-180">
-                  ⌄
-                </span>
+                <span className="chevron text-subtle">⌄</span>
               </summary>
               <p className="mt-1.5 max-w-xl text-sm text-muted">
                 {tool.description}

@@ -1327,18 +1327,11 @@ function BoardMenu({
   onDelete: (id: string) => void;
 }) {
   const { ref, close } = useMenu();
-  // Tailwind never emits `group-open:` here — there isn't a single rotate-180
-  // rule in the built CSS — so the chevron is turned from state instead of by a
-  // variant that silently does nothing.
-  const [open, setOpen] = useState(false);
   return (
     // `relative` lives HERE, not on the <details>: anchored to the control, the
     // menu drops straight down under the name instead of hanging off a chevron.
     <div className="relative">
-      <details
-        ref={ref}
-        onToggle={(e) => setOpen(e.currentTarget.open)}
-      >
+      <details ref={ref}>
         {/* Name and chevron are one button. The name used to be a bare input
             sitting in the toolbar — which looked like a label, behaved like a
             field, and put renaming somewhere you'd never look for it. */}
@@ -1353,8 +1346,7 @@ function BoardMenu({
           <svg
             viewBox="0 0 12 12"
             aria-hidden
-            style={{ transform: open ? "rotate(180deg)" : undefined }}
-            className="h-3 w-3 shrink-0 text-subtle transition-transform duration-150"
+            className="chevron h-3 w-3 shrink-0 text-subtle"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.6"
@@ -1425,10 +1417,17 @@ function BoardMenu({
                       {ago(b.updated_at)}
                     </span>
                   </button>
+                  {/* A real target. This was a 12px glyph at zero opacity until
+                      you happened to hover the row — invisible until you found
+                      it, then hard to hit once you had. */}
                   <button
-                    onClick={() => onDelete(b.id)}
-                    title="Delete board"
-                    className="shrink-0 px-1 text-xs text-subtle opacity-0 transition-opacity hover:text-accent-2 group-hover:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(b.id);
+                    }}
+                    title={`Delete "${b.title}"`}
+                    aria-label={`Delete ${b.title}`}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm text-subtle opacity-40 transition-all hover:bg-hover hover:text-accent-2 hover:opacity-100 group-hover:opacity-100"
                   >
                     ✕
                   </button>
