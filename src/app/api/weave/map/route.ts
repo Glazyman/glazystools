@@ -85,12 +85,17 @@ const ResultSchema = z.object({
     }),
   ),
   unlink: z.array(z.object({ source: z.string(), target: z.string() })),
-  remove: z.array(
+  command: z.array(
     z.object({
-      id: z.string(),
+      action: z
+        .enum(["delete", "expand", "prompt"])
+        .describe(
+          "delete = remove the cards; expand = suggest next cards from them; prompt = compose a build prompt from them.",
+        ),
+      ids: z.array(z.string()).describe("The target card ids."),
       reason: z
         .string()
-        .describe("The speaker's words that asked for this removal."),
+        .describe("The speaker's words that gave this order."),
     }),
   ),
   ask: z.array(
@@ -218,23 +223,32 @@ You may still link to it or connect new cards to it.
 ## Spoken commands
 
 The speaker can talk TO the map as well as think on it. A run that is an
-imperative aimed at the board — "delete that", "remove the pricing card",
-"scrap the note you just made", "get rid of the parlay card" — is a command,
-not a point to map. A command never creates a card.
+imperative aimed at the board is a COMMAND, not a point to map:
 
-For deletions, use remove. Cards are listed on the board oldest → newest, so
-"the last card" / "the note you just created" is the newest card that fits
-what they said. Only remove what the speaker names or plainly points at — if
-you genuinely cannot tell which card they mean, use ask instead. The user
-confirms every removal by hand before it lands, so a confident match is
-enough; an unasked-for removal is still never acceptable.
+  "delete that last card" / "get rid of the parlay note"  → action: delete
+  "expand the pricing card" / "expand on that"            → action: expand
+  "make a prompt out of these" / "build a prompt from it" → action: prompt
+
+A command never produces cards from you — you only name the action and its
+target ids; the app executes it (with the user's confirmation where needed).
+A run can be a command AND carry a thought; map the thought as usual and
+return the command alongside.
+
+Resolving the targets:
+- "this / that / these / them" while cards are SELECTED (see the selected
+  section when present) = exactly the selected cards.
+- A named card ("the pricing card") = the card whose title/body best matches.
+- "the last card" / "the note you just made" = cards are listed oldest →
+  newest, so the newest card that fits what they said.
+- If you genuinely cannot tell which card they mean, use ask instead. A
+  confident match is enough — never a guess.
 
 ## Operations
 
-You return seven lists: create, chart, update, link, unlink, remove, ask. Any
-of them may be empty, and usually ALL of them are. Never invent a card id —
-only ids shown on the board, or a ref from your own create/chart lists this
-batch.
+You return seven lists: create, chart, update, link, unlink, command, ask.
+Any of them may be empty, and usually ALL of them are. Never invent a card
+id — only ids shown on the board, or a ref from your own create/chart lists
+this batch.
 
 create — a new distinct point. Every field is required.
   ref: a short handle you invent ("c1") so other ops in THIS batch can point at it
@@ -270,9 +284,9 @@ update — restate the card's FULL new state: { id, type, title, body }.
 link — { source, target, label } a relationship between two cards already on the
   board. label is "" unless a short word genuinely clarifies it.
 unlink — { source, target } only when the speaker explicitly says two things aren't related.
-remove — { id, reason } the speaker TOLD you to delete a card (see Spoken
-  commands). reason quotes their words. Never used for tidying on your own
-  initiative — that is another pass's job.
+command — { action, ids, reason } the speaker TOLD you to do something (see
+  Spoken commands). reason quotes their words. Never used on your own
+  initiative — no order, no command.
 ask — { text, cardId } a clarifying question; cardId is "" if not about one card.
 
 ## Connections
@@ -311,7 +325,7 @@ say. Most batches contain no ask. Phrase it as one short, direct question.
 ## Output
 
 reasoning: one short sentence.
-create / chart / update / link / unlink / remove / ask: the seven lists,
+create / chart / update / link / unlink / command / ask: the seven lists,
 usually all empty.
 
 Your reasoning and your lists must agree. If you say you're creating a card,
@@ -320,10 +334,11 @@ the create list must actually contain it, complete with its title and body.`;
 type Body = {
   utterance: string;
   /**
-   * Set when the speaker SELECTED a card before talking — this run of speech
-   * is aimed at that card, not at the board in general.
+   * Set when the speaker SELECTED cards before talking — this run of speech
+   * is aimed at them, not at the board in general. One card = full aimed-at
+   * mapping; several = mostly a command target ("expand these").
    */
-  focusCardId?: string;
+  focusCardIds?: string[];
   /**
    * Set when the speaker has hand-corrected an earlier utterance's text.
    * Each entry is a card the old text changed: what it says now, and what it
@@ -346,7 +361,7 @@ export async function POST(req: Request) {
   try {
     const {
       utterance,
-      focusCardId,
+      focusCardIds = [],
       correcting = [],
       recent = [],
       cards = [],
@@ -354,12 +369,11 @@ export async function POST(req: Request) {
     } = (await req.json()) as Body;
 
     if (!utterance || utterance.trim().length < 2) {
-      return Response.json({ ops: [], reasoning: "empty" });
+      return Response.json({ ops: [], commands: [], reasoning: "empty" });
     }
 
-    const focus = focusCardId
-      ? cards.find((c) => c.id === focusCardId)
-      : undefined;
+    const focused = cards.filter((c) => focusCardIds.includes(c.id));
+    const focus = focused.length === 1 ? focused[0] : undefined;
 
     const board =
       cards.length === 0
@@ -415,6 +429,18 @@ Read the run as being about THIS card unless it plainly is not:
 - Even if this card is marked pinned:true, YOU MAY UPDATE IT — aiming at it
   and speaking is the user editing their own card, which is exactly what the
   pin protects.
+- A command saying "this / that / it" targets THIS card.
+
+` : ""
+}${
+  focused.length > 1
+    ? `## THE SPEAKER SELECTED ${focused.length} CARDS BEFORE TALKING
+
+${focused.map((c) => `- id:${c.id} [${c.type}] "${c.title}" — ${c.body}`).join("\n")}
+
+A command saying "these / them / this" targets exactly these cards. A run
+that is a thought rather than a command should connect its new points to
+whichever of these cards it is actually about.
 
 ` : ""
 }${
@@ -445,6 +471,11 @@ most common correct answer.`,
 
     return Response.json({
       ops: flatten(object),
+      // Commands ride beside the ops, never inside them: the client decides
+      // what executes directly and what waits for a confirming hand.
+      commands: object.command.filter(
+        (c) => c.ids.length > 0 && c.reason.trim(),
+      ),
       reasoning: object.reasoning,
       cost: await costOf(MODEL, usage),
     });
@@ -512,11 +543,6 @@ function flatten(o: z.infer<typeof ResultSchema>): Op[] {
   for (const u of o.unlink) {
     if (!u.source || !u.target) continue;
     ops.push({ op: "unlink", source: u.source, target: u.target });
-  }
-  for (const r of o.remove) {
-    // Same guard as consolidate: no justification, no deletion.
-    if (!r.id || !r.reason.trim()) continue;
-    ops.push({ op: "delete_card", id: r.id });
   }
   for (const a of o.ask) {
     if (!a.text.trim()) continue;

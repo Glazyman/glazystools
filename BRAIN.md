@@ -9,6 +9,33 @@ obvious.
 
 ---
 
+## 2026-07-17 — Weave: voice commands become a system (delete / expand / prompt)
+
+The map route's `remove` list grew into `command: {action, ids, reason}` with
+three verbs — delete, expand, prompt — returned BESIDE the ops (`commands` in
+the response), never inside them. The client decides what runs:
+
+- **Aimed commands run immediately.** Cards selected + Space + "make a prompt
+  out of these" → executes on the spot (the speaker pointed AND spoke).
+  `focusCardId` became `focusCardIds[]` — multi-select now rides into the map
+  call; 1 card = full aimed-mapping block, several = command-target block.
+- **Named commands wait for a hand.** No selection + "expand the pricing
+  card" → a confirm question in the rail's Questions section ("Expand
+  “Pricing”? [Expand] [Skip]"), one row per command (`pendingCommands[]`).
+- **Deletes ALWAYS wait**, aimed or not.
+- **The rail labels command lines** — "⌘ delete" / "⌘ expand" in accent-2
+  next to the card count (`Utterance.commands`), so orders are visually
+  distinct from thoughts.
+- Executors: delete → delete_card ops; expand → expandCard per id; prompt →
+  `buildPromptFrom(ids, anchor)` (extracted from buildPrompt so the menu path
+  and the voice path share one body). mapBatch runs commands through
+  `runCommandRef` because the executors are declared far below it — calling
+  them directly would put not-yet-initialized consts in a dep array (TDZ).
+
+Verified: aimed "make a prompt out of these" → prompt command with exactly
+the selected ids; "expand on the scraping risk card" → expand a2; "delete the
+revenue card" → delete a3; plain feature talk → zero commands, one create.
+
 ## 2026-07-17 — Weave: spoken deletes, prompt lineage, card→transcript lighting
 
 1. **Spoken deletes with a confirm.** "delete the note you just created" →

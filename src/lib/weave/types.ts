@@ -100,6 +100,9 @@ export type Utterance = {
   status: UtteranceStatus;
   /** Cards this utterance created or updated. Empty = it was filler. */
   cardIds: string[];
+  /** Actions this utterance COMMANDED ("delete", "expand", "prompt") — the
+   *  rail labels these lines so orders are distinguishable from thoughts. */
+  commands?: string[];
   /**
    * What the cards this utterance CHANGED looked like before it changed them.
    *
@@ -109,6 +112,18 @@ export type Utterance = {
    * never undo it and put the point where it actually belonged.
    */
   before?: { id: string; type: CardType; title: string; body: string }[];
+};
+
+/** A spoken command ("delete that", "expand the pricing card") on its way to
+ *  being executed — staged in the rail's Questions section when it needs a
+ *  confirming hand. */
+export type PendingCommand = {
+  /** Client-side handle so a list of these can be confirmed independently. */
+  key: string;
+  boardId: string | null;
+  action: "delete" | "expand" | "prompt";
+  ids: string[];
+  titles: string[];
 };
 
 /** A clarifying question the model wants answered out loud. */

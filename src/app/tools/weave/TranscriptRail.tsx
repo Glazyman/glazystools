@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { OpenQuestion, Utterance } from "@/lib/weave/types";
+import type {
+  OpenQuestion,
+  PendingCommand,
+  Utterance,
+} from "@/lib/weave/types";
 
 export type TranscriptRailProps = {
   utterances: Utterance[];
@@ -16,11 +20,11 @@ export type TranscriptRailProps = {
   level: number;
   /** Whatever the talk key is currently bound to, for the empty state. */
   talkKeyLabel: string;
-  /** A spoken deletion waiting for a hand to confirm it. Lives with the
-   *  questions: it IS one — the most consequential kind. */
-  deleteAsk: { titles: string[] } | null;
-  onDeleteConfirm: () => void;
-  onDeleteKeep: () => void;
+  /** Spoken commands waiting for a hand to confirm them. They live with the
+   *  questions: each IS one — the most consequential kind. */
+  commandAsks: PendingCommand[];
+  onCommandConfirm: (cmd: PendingCommand) => void;
+  onCommandSkip: (key: string) => void;
   onSpotlight: (cardIds: string[] | null) => void;
   /** Typed instead of spoken. */
   onSubmitText: (text: string) => void;
@@ -37,9 +41,9 @@ export function TranscriptRail({
   highlight,
   interim,
   questions,
-  deleteAsk,
-  onDeleteConfirm,
-  onDeleteKeep,
+  commandAsks,
+  onCommandConfirm,
+  onCommandSkip,
   listening,
   level,
   talkKeyLabel,
@@ -211,6 +215,11 @@ export function TranscriptRail({
                         sharpening…
                       </span>
                     )}
+                    {(u.commands?.length ?? 0) > 0 && (
+                      <span className="font-mono text-[9px] uppercase tracking-wider text-accent-2">
+                        ⌘ {u.commands!.join(" · ")}
+                      </span>
+                    )}
                     {u.cardIds.length > 0 && (
                       <span className="font-mono text-[9px] uppercase tracking-wider text-accent">
                         {u.cardIds.length} card{u.cardIds.length > 1 ? "s" : ""}
@@ -256,35 +265,48 @@ export function TranscriptRail({
       <div className="border-t border-border px-4 py-3">
         <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-subtle">
           Questions for you{" "}
-          {questions.length + (deleteAsk ? 1 : 0) > 0 &&
-            `(${questions.length + (deleteAsk ? 1 : 0)})`}
+          {questions.length + commandAsks.length > 0 &&
+            `(${questions.length + commandAsks.length})`}
         </div>
-        {deleteAsk && (
-          <div
-            className="mb-2 rounded-[10px] border border-dashed px-3 py-2"
-            style={{ borderColor: "var(--accent-2)" }}
-          >
-            <p className="text-xs italic leading-relaxed text-fg">
-              You asked to delete{" "}
-              {deleteAsk.titles.map((t) => `“${t}”`).join(", ")} — sure?
-            </p>
-            <div className="mt-2 flex items-center gap-3">
-              <button
-                onClick={onDeleteConfirm}
-                className="font-mono text-[10px] uppercase tracking-wider text-accent-2 transition-opacity hover:opacity-70"
-              >
-                Delete
-              </button>
-              <button
-                onClick={onDeleteKeep}
-                className="font-mono text-[10px] uppercase tracking-wider text-subtle transition-colors hover:text-fg"
-              >
-                Keep
-              </button>
+        {commandAsks.map((cmd) => {
+          const names = cmd.titles.map((t) => `“${t}”`).join(", ");
+          const wording =
+            cmd.action === "delete"
+              ? `You asked to delete ${names} — sure?`
+              : cmd.action === "expand"
+                ? `Expand ${names}?`
+                : `Build a prompt from ${names}?`;
+          const verb =
+            cmd.action === "delete"
+              ? "Delete"
+              : cmd.action === "expand"
+                ? "Expand"
+                : "Do it";
+          return (
+            <div
+              key={cmd.key}
+              className="mb-2 rounded-[10px] border border-dashed px-3 py-2"
+              style={{ borderColor: "var(--accent-2)" }}
+            >
+              <p className="text-xs italic leading-relaxed text-fg">{wording}</p>
+              <div className="mt-2 flex items-center gap-3">
+                <button
+                  onClick={() => onCommandConfirm(cmd)}
+                  className="font-mono text-[10px] uppercase tracking-wider text-accent-2 transition-opacity hover:opacity-70"
+                >
+                  {verb}
+                </button>
+                <button
+                  onClick={() => onCommandSkip(cmd.key)}
+                  className="font-mono text-[10px] uppercase tracking-wider text-subtle transition-colors hover:text-fg"
+                >
+                  Skip
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-        {questions.length === 0 && !deleteAsk ? (
+          );
+        })}
+        {questions.length === 0 && commandAsks.length === 0 ? (
           <p className="text-xs text-subtle">None open.</p>
         ) : (
           <div className="max-h-40 space-y-2 overflow-y-auto">

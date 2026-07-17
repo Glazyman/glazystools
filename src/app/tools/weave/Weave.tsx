@@ -27,6 +27,7 @@ import {
   type CardType,
   type OpenQuestion,
   type Op,
+  type PendingCommand,
 } from "@/lib/weave/types";
 import { Board, type BoardApi } from "./Board";
 import { CardMenu, type CardMenuState } from "./CardMenu";
@@ -123,13 +124,10 @@ export function Weave() {
     before: BoardDoc;
   } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
-  /** Deletions the speaker asked for out loud, awaiting the hand that
-   *  confirms them. A misheard "delete that" must never cost a card. */
-  const [confirmDeletes, setConfirmDeletes] = useState<{
-    boardId: string | null;
-    ops: Op[];
-    titles: string[];
-  } | null>(null);
+  /** Spoken commands awaiting the hand that confirms them. Commands aimed at
+   *  the SELECTION run straight away (deletes excepted — a misheard "delete
+   *  that" must never cost a card); commands naming a card wait here. */
+  const [pendingCommands, setPendingCommands] = useState<PendingCommand[]>([]);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -209,8 +207,12 @@ export function Weave() {
   const spokeRef = useRef(false);
 
   // Voice targeting: what your speech is aimed at.
-  /** Card selected when listening started — this session speaks AT it. */
-  const focusCardRef = useRef<string | null>(null);
+  /** Cards selected when listening started — this session speaks AT them.
+   *  One card = full aimed mapping; several = mostly a command target. */
+  const focusCardRef = useRef<string[] | null>(null);
+  /** Executes a spoken command; assigned after the executors exist (they are
+   *  declared far below mapBatch, which needs to call this). */
+  const runCommandRef = useRef<(cmd: PendingCommand) => void>(() => {});
   /** A transcript line being re-spoken. `captured` flips on its first final,
    *  so a stray second final can't hijack the replacement. */
   const redictateRef = useRef<{ id: string; captured: boolean } | null>(null);
@@ -411,7 +413,7 @@ export function Weave() {
     async (
       batch: { id: string; text: string }[],
       correcting?: { id: string; title: string; body: string }[],
-      focusCardId?: string,
+      focusCardIds?: string[],
     ) => {
       if (!batch.length) return;
       // A response can land after you've switched boards; applying it then
@@ -428,7 +430,7 @@ export function Weave() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             utterance: text,
-            focusCardId,
+            focusCardIds,
             correcting,
             recent: d.utterances
               .filter((u) => !ids.includes(u.id))
@@ -446,46 +448,76 @@ export function Weave() {
         });
         const json = (await res.json()) as {
           ops?: Op[];
+          commands?: {
+            action: PendingCommand["action"];
+            ids: string[];
+            reason: string;
+          }[];
           cost?: number;
           error?: string;
         };
         if (json.error) throw new Error(json.error);
         addSpend(json.cost);
-        let ops = json.ops ?? [];
-        if (!ops.length) return; // Filler. The overwhelmingly common case.
         if (boardIdRef.current !== boardAtCall) return;
+        const ops = json.ops ?? [];
 
-        // Spoken deletions don't land on their own — they wait for the
-        // confirm banner. Everything else in the batch applies as normal.
-        const spokenDeletes = ops.filter((o) => o.op === "delete_card");
-        if (spokenDeletes.length) {
-          ops = ops.filter((o) => o.op !== "delete_card");
-          const titles = spokenDeletes
-            .map((o) =>
-              o.op === "delete_card"
-                ? docRef.current.cards.find((c) => c.id === o.id)?.title
-                : undefined,
-            )
-            .filter((t): t is string => Boolean(t));
-          if (titles.length) {
-            setConfirmDeletes({
+        // Spoken commands. Aimed at the selection → the speaker pointed AND
+        // spoke, so it executes directly; naming a card from across the room
+        // → it waits in the rail's questions for a confirming hand. Deletes
+        // always wait — a misheard "delete that" must never cost a card.
+        const commands = (json.commands ?? [])
+          .map((c) => {
+            const valid = c.ids.filter((id) =>
+              docRef.current.cards.some((x) => x.id === id),
+            );
+            return {
+              key: crypto.randomUUID(),
               boardId: boardAtCall,
-              ops: spokenDeletes,
-              titles,
-            });
+              action: c.action,
+              ids: valid,
+              titles: valid.map(
+                (id) =>
+                  docRef.current.cards.find((x) => x.id === id)?.title ?? "",
+              ),
+            };
+          })
+          .filter((c) => c.ids.length > 0);
+        if (commands.length) {
+          // The rail labels the lines that gave orders.
+          const actions = [...new Set(commands.map((c) => c.action))];
+          updateDoc((dd) => ({
+            ...dd,
+            utterances: dd.utterances.map((u) =>
+              ids.includes(u.id)
+                ? {
+                    ...u,
+                    commands: [...new Set([...(u.commands ?? []), ...actions])],
+                  }
+                : u,
+            ),
+          }));
+          for (const cmd of commands) {
+            const aimed =
+              !!focusCardIds?.length &&
+              cmd.ids.every((id) => focusCardIds.includes(id));
+            if (aimed && cmd.action !== "delete") runCommandRef.current(cmd);
+            else setPendingCommands((prev) => [...prev, cmd]);
           }
         }
-        if (!ops.length) return;
+
+        if (!ops.length) return; // Filler. The overwhelmingly common case.
 
         pushHistory();
-        // Speaking AT a pinned card is the user editing their own card — the
+        // Speaking AT pinned cards is the user editing their own cards — the
         // pin guards against unaimed rewrites, not this. applyOps would
-        // silently refuse the update otherwise, so lift it first.
-        const base = focusCardId
+        // silently refuse the updates otherwise, so lift them first.
+        const base = focusCardIds?.length
           ? {
               ...docRef.current,
               cards: docRef.current.cards.map((c) =>
-                c.id === focusCardId && c.pinned ? { ...c, pinned: false } : c,
+                focusCardIds.includes(c.id) && c.pinned
+                  ? { ...c, pinned: false }
+                  : c,
               ),
             }
           : docRef.current;
@@ -501,7 +533,7 @@ export function Weave() {
         setMapping((m) => m - 1);
       }
     },
-    [addSpend, flashCards, markDirty, pushHistory],
+    [addSpend, flashCards, markDirty, pushHistory, updateDoc],
   );
 
   const flush = useCallback(() => {
@@ -1100,18 +1132,14 @@ export function Weave() {
    * pinned card (pinned so neither the mapper nor the review pass rewrites a
    * deliverable) and copied to the clipboard.
    */
-  const buildPrompt = useCallback(
-    async (cardId: string) => {
+  const buildPromptFrom = useCallback(
+    async (ids: string[], anchorId: string) => {
       const boardAtCall = boardIdRef.current;
       const d = docRef.current;
-      // Right-clicking inside your selection means "from these"; right-clicking
-      // an unselected card means "from this one".
-      const sel = selectionRef.current;
-      const ids = sel.length > 1 && sel.includes(cardId) ? sel : [cardId];
       const chosen = d.cards.filter((c) => ids.includes(c.id));
       if (!chosen.length) return;
 
-      setExpanding((prev) => new Set(prev).add(cardId));
+      setExpanding((prev) => new Set(prev).add(anchorId));
       try {
         const res = await fetch("/api/weave/prompt", {
           method: "POST",
@@ -1141,7 +1169,7 @@ export function Weave() {
         if (!prompt) throw new Error("The prompt came back empty.");
         if (boardIdRef.current !== boardAtCall) return;
 
-        const src = docRef.current.cards.find((c) => c.id === cardId);
+        const src = docRef.current.cards.find((c) => c.id === anchorId);
         const at = freeSpotNear(docRef.current, {
           x: (src?.x ?? 0) + CARD_W + 60,
           y: src?.y ?? 0,
@@ -1180,12 +1208,23 @@ export function Weave() {
       } finally {
         setExpanding((prev) => {
           const n = new Set(prev);
-          n.delete(cardId);
+          n.delete(anchorId);
           return n;
         });
       }
     },
     [addSpend, flashCards, pushHistory, updateDoc],
+  );
+
+  /** The right-click entry: inside your selection means "from these";
+   *  an unselected card means "from this one". */
+  const buildPrompt = useCallback(
+    (cardId: string) => {
+      const sel = selectionRef.current;
+      const ids = sel.length > 1 && sel.includes(cardId) ? sel : [cardId];
+      return buildPromptFrom(ids, cardId);
+    },
+    [buildPromptFrom],
   );
 
   /**
@@ -1375,21 +1414,47 @@ export function Weave() {
     }
   };
 
-  /** The hand that lands a spoken deletion. */
-  const applySpokenDeletes = useCallback(() => {
-    if (!confirmDeletes) return;
-    setConfirmDeletes(null);
-    // The board may have changed hands since the words were said.
-    if (boardIdRef.current !== confirmDeletes.boardId) return;
-    pushHistory();
-    const { doc: next } = applyOps(docRef.current, confirmDeletes.ops);
-    docRef.current = next;
-    setDoc(next);
-    markDirty();
-    setNotice(
-      `Deleted ${confirmDeletes.titles.map((t) => `“${t}”`).join(", ")}.`,
-    );
-  }, [confirmDeletes, markDirty, pushHistory]);
+  /** Executes a spoken command — directly for selection-aimed ones, or from
+   *  the rail's confirm question for the rest. */
+  const runCommand = useCallback(
+    (cmd: PendingCommand) => {
+      setPendingCommands((prev) => prev.filter((c) => c.key !== cmd.key));
+      // The board may have changed hands since the words were said.
+      if (boardIdRef.current !== cmd.boardId) return;
+      const alive = cmd.ids.filter((id) =>
+        docRef.current.cards.some((c) => c.id === id),
+      );
+      if (!alive.length) return;
+      switch (cmd.action) {
+        case "delete": {
+          pushHistory();
+          const { doc: next } = applyOps(
+            docRef.current,
+            alive.map((id) => ({ op: "delete_card" as const, id })),
+          );
+          docRef.current = next;
+          setDoc(next);
+          markDirty();
+          setNotice(`Deleted ${cmd.titles.map((t) => `“${t}”`).join(", ")}.`);
+          break;
+        }
+        case "expand":
+          for (const id of alive) void expandCard(id);
+          break;
+        case "prompt":
+          void buildPromptFrom(alive, alive[0]);
+          break;
+      }
+    },
+    [buildPromptFrom, expandCard, markDirty, pushHistory],
+  );
+  useEffect(() => {
+    runCommandRef.current = runCommand;
+  });
+
+  const skipCommand = useCallback((key: string) => {
+    setPendingCommands((prev) => prev.filter((c) => c.key !== key));
+  }, []);
 
   /** The veto: put the board back exactly as it was before the review.
    *  A snapshot restore rather than an undo-stack pop, so edits you made
@@ -1436,11 +1501,18 @@ export function Weave() {
     // transcript line) takes precedence over whatever happens to be selected.
     if (speech.state === "listening" && was !== "listening") {
       spokeRef.current = false;
-      if (!redictateRef.current && selectionRef.current.length === 1) {
-        const target = selectionRef.current[0];
-        focusCardRef.current = target;
-        const card = docRef.current.cards.find((c) => c.id === target);
-        if (card) setNotice(`Speaking to “${card.title}” — say what should change.`);
+      if (!redictateRef.current && selectionRef.current.length > 0) {
+        const targets = [...selectionRef.current];
+        focusCardRef.current = targets;
+        if (targets.length === 1) {
+          const card = docRef.current.cards.find((c) => c.id === targets[0]);
+          if (card)
+            setNotice(`Speaking to “${card.title}” — say what should change.`);
+        } else {
+          setNotice(
+            `Speaking to ${targets.length} cards — describe them or give a command.`,
+          );
+        }
       } else {
         focusCardRef.current = null;
       }
@@ -1715,9 +1787,9 @@ export function Weave() {
             highlight={railHighlight}
             interim={interim}
             questions={doc.questions}
-            deleteAsk={confirmDeletes}
-            onDeleteConfirm={applySpokenDeletes}
-            onDeleteKeep={() => setConfirmDeletes(null)}
+            commandAsks={pendingCommands}
+            onCommandConfirm={runCommand}
+            onCommandSkip={skipCommand}
             listening={listening}
             level={speech.level}
             talkKeyLabel={keyLabel(talkKey)}
