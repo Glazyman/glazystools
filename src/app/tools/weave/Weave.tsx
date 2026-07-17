@@ -882,8 +882,14 @@ export function Weave() {
         theme === "light" ? "weave-light" : "weave-dark",
       ].join(" ")}
     >
-      {/* Toolbar */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+      {/* Toolbar.
+          data-drag marks this as a window drag handle for the desktop app —
+          the Mac shell watches for a mousedown on any empty part of it and
+          hands the drag to the window. Inert in a browser. */}
+      <div
+        data-drag
+        className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5"
+      >
         <button
           onClick={toggleRail}
           title={railOpen ? "Hide transcript" : "Show transcript"}
