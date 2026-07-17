@@ -785,12 +785,24 @@ export function Weave() {
 
           <div className="mx-1 h-5 w-px bg-border" />
 
-          <TB onClick={undo} disabled={!canUndo} title="Undo (⌘Z)">
-            ↶
-          </TB>
-          <TB onClick={redo} disabled={!canRedo} title="Redo (⇧⌘Z)">
-            ↷
-          </TB>
+          {/* Undo/redo carry more weight than the text buttons beside them —
+              they're the escape hatch, and you look for them in a hurry. */}
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            title="Undo (⌘Z)"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-base font-semibold leading-none text-fg transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:border-border disabled:text-subtle disabled:opacity-40"
+          >
+            ↺
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            title="Redo (⇧⌘Z)"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-base font-semibold leading-none text-fg transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:border-border disabled:text-subtle disabled:opacity-40"
+          >
+            ↻
+          </button>
           <TB onClick={doTidy} disabled={!doc.cards.length} title="Tidy layout">
             Tidy
           </TB>
@@ -802,25 +814,7 @@ export function Weave() {
             {consolidating ? "Consolidating…" : "✦ Consolidate"}
           </TB>
 
-          <details className="relative">
-            <summary className="cursor-pointer list-none rounded-md border border-border px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg">
-              Export
-            </summary>
-            <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
-              <button
-                onClick={() => exportAs("md")}
-                className="block w-full px-3 py-2 text-left text-xs text-muted hover:bg-hover hover:text-fg"
-              >
-                Markdown
-              </button>
-              <button
-                onClick={() => exportAs("json")}
-                className="block w-full px-3 py-2 text-left text-xs text-muted hover:bg-hover hover:text-fg"
-              >
-                JSON
-              </button>
-            </div>
-          </details>
+          <ExportMenu onExport={exportAs} />
 
           <TB onClick={clearBoard} title="Clear the board">
             Clear
@@ -987,6 +981,64 @@ function Banner({
   );
 }
 
+/**
+ * A <details> menu stays open until you click its summary again — it doesn't
+ * close when you pick something, or when you click away, which is what every
+ * other menu on earth does. This gives one back a `close()` and the
+ * click-outside behaviour.
+ */
+function useMenu() {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const close = useCallback(() => {
+    if (ref.current) ref.current.open = false;
+  }, []);
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = ref.current;
+      if (el?.open && !el.contains(e.target as Node)) el.open = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [close]);
+  return { ref, close };
+}
+
+function ExportMenu({ onExport }: { onExport: (kind: "md" | "json") => void }) {
+  const { ref, close } = useMenu();
+  const pick = (kind: "md" | "json") => {
+    close();
+    onExport(kind);
+  };
+  return (
+    <details ref={ref} className="relative">
+      <summary className="cursor-pointer list-none rounded-md border border-border px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg">
+        Export
+      </summary>
+      <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
+        <button
+          onClick={() => pick("md")}
+          className="block w-full px-3 py-2 text-left text-xs text-muted hover:bg-hover hover:text-fg"
+        >
+          Markdown
+        </button>
+        <button
+          onClick={() => pick("json")}
+          className="block w-full px-3 py-2 text-left text-xs text-muted hover:bg-hover hover:text-fg"
+        >
+          JSON
+        </button>
+      </div>
+    </details>
+  );
+}
+
 function BoardMenu({
   boards,
   boardId,
@@ -1006,6 +1058,7 @@ function BoardMenu({
   onNew: () => void;
   onDelete: (id: string) => void;
 }) {
+  const { ref, close } = useMenu();
   return (
     <div className="flex items-center gap-1">
       <input
@@ -1018,7 +1071,7 @@ function BoardMenu({
         placeholder="Untitled board"
         className="w-40 rounded-md bg-transparent px-2 py-1 text-sm font-medium outline-none transition-colors hover:bg-elevated focus:bg-elevated"
       />
-      <details className="relative">
+      <details ref={ref} className="relative">
         <summary className="cursor-pointer list-none rounded-md px-1.5 py-1 text-xs text-subtle transition-colors hover:bg-hover hover:text-fg">
           ⌄
         </summary>
@@ -1033,7 +1086,10 @@ function BoardMenu({
                 ].join(" ")}
               >
                 <button
-                  onClick={() => onOpen(b.id)}
+                  onClick={() => {
+                    close();
+                    onOpen(b.id);
+                  }}
                   className="min-w-0 flex-1 truncate text-left"
                 >
                   {b.title}
@@ -1049,7 +1105,10 @@ function BoardMenu({
             ))}
           </div>
           <button
-            onClick={onNew}
+            onClick={() => {
+              close();
+              onNew();
+            }}
             className="block w-full border-t border-border px-3 py-2 text-left text-xs text-accent hover:bg-hover"
           >
             + New board
