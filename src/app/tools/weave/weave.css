@@ -1,15 +1,22 @@
-/* Weave — a light whiteboard inside a dark workspace.
+/* Weave — a themeable board inside a dark workspace.
  *
- * Rather than hard-coding colours into the components, this re-points the SAME
- * semantic tokens the rest of the app uses (--bg, --panel, --fg, --border …) at
- * light values, scoped to this subtree. Every `bg-panel` / `text-muted` /
- * `border-border` inside Weave then flips on its own, no component knows a
- * theme exists, and nothing outside `.weave-light` is affected.
+ * Dark needs no rules at all: the workspace's :root tokens already are the dark
+ * theme, so `.weave-root` alone inherits it. Light is `.weave-root.weave-light`,
+ * which re-points the SAME semantic tokens (--bg, --panel, --fg, --border …) at
+ * light values for this subtree only. Every `bg-panel` / `text-muted` /
+ * `border-border` inside Weave flips on its own, no component knows a theme
+ * exists, and nothing outside the scope is affected.
  *
- * Accents keep their hue but go darker: the lime that reads well on #0b0b0d is
- * invisible on white, and these are used for text and 1.5px strokes, not just
- * fills. Same brand, legible contrast.
+ * Light accents keep their hue but go darker: the lime that reads well on
+ * #0b0b0d is invisible on white, and these are used for text and 1.5px strokes,
+ * not just fills. Same brand, legible contrast.
  */
+
+/* Both themes: keep React Flow's own blue selection rect on-brand. */
+.weave-root .react-flow__selection {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid var(--accent);
+}
 
 .weave-light {
   /* Surfaces — white canvas, white cards, grey fills for inputs. */
@@ -47,14 +54,8 @@
 }
 
 /* The workspace's global rule paints every border with the dark token; inside
-   Weave the light one has to win, including on React Flow's own elements. */
+   the light board the light one has to win, including on React Flow's own
+   elements. */
 .weave-light * {
   border-color: var(--border);
-}
-
-/* React Flow paints its attribution/controls against a light default already,
-   but the selection rectangle uses its own blue. Keep it on-brand. */
-.weave-light .react-flow__selection {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border: 1px solid var(--accent);
 }

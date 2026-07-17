@@ -34,6 +34,7 @@ import "./weave.css";
 
 const LAST_BOARD = "weave:lastBoard";
 const RAIL_OPEN = "weave:railOpen";
+const THEME = "weave:theme";
 
 // ── Batching ──────────────────────────────────────────────────────────────
 //
@@ -80,13 +81,32 @@ export function Weave() {
   );
   const [railOverride, setRailOverride] = useState<boolean | null>(null);
   const railOpen = railOverride ?? railStored;
+  // The write stays OUT of the setState updater: StrictMode double-invokes
+  // updaters to check purity, so a side effect in there runs twice and the
+  // second pass reads back its own write — which silently persisted the
+  // opposite of what you clicked.
   const toggleRail = useCallback(() => {
-    setRailOverride((prev) => {
-      const next = !(prev ?? localStorage.getItem(RAIL_OPEN) !== "0");
-      localStorage.setItem(RAIL_OPEN, next ? "1" : "0");
-      return next;
-    });
-  }, []);
+    const next = !railOpen;
+    localStorage.setItem(RAIL_OPEN, next ? "1" : "0");
+    setRailOverride(next);
+  }, [railOpen]);
+
+  // Board theme. Light by default — it's a whiteboard. Same SSR-safe read as
+  // the rail; the workspace around it stays dark either way.
+  const themeStored = useSyncExternalStore(
+    () => () => {},
+    () => (localStorage.getItem(THEME) === "dark" ? "dark" : "light"),
+    () => "light" as const,
+  );
+  const [themeOverride, setThemeOverride] = useState<"light" | "dark" | null>(
+    null,
+  );
+  const theme = themeOverride ?? themeStored;
+  const toggleTheme = useCallback(() => {
+    const next = theme === "dark" ? "light" : "dark";
+    localStorage.setItem(THEME, next);
+    setThemeOverride(next);
+  }, [theme]);
 
   // docRef is the real source of truth. Async work (a map response landing
   // seconds later) must never read a stale doc from a closure, so every
@@ -588,9 +608,14 @@ export function Weave() {
 
   return (
     // weave-light re-points the shared design tokens at light values for this
-    // subtree only — see weave.css. The workspace stays dark; the board is a
-    // whiteboard.
-    <div className="weave-light flex h-full flex-col">
+    // subtree only — see weave.css. Dark needs no class: the workspace's own
+    // :root tokens already are the dark theme.
+    <div
+      className={[
+        "weave-root flex h-full flex-col",
+        theme === "light" ? "weave-light" : "",
+      ].join(" ")}
+    >
       {/* Toolbar */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
         <button
@@ -701,6 +726,12 @@ export function Weave() {
 
           <TB onClick={clearBoard} title="Clear the board">
             Clear
+          </TB>
+          <TB
+            onClick={toggleTheme}
+            title={theme === "light" ? "Dark board" : "Light board"}
+          >
+            {theme === "light" ? "☾" : "☀"}
           </TB>
 
           <span

@@ -58,14 +58,22 @@ to every slice or it won't decode.
 scroll) and `hideHeader` props for tools that own their viewport. Kept generic
 per golden rule 3.
 
-**Light theme, scoped.** Weave is a *white* whiteboard inside the dark
-workspace. `weave.css` re-points the SAME semantic tokens (`--bg`, `--panel`,
-`--fg`, `--border`, accents) at light values under a single `.weave-light`
-class. Every component flips on its own, none of them know a theme exists, and
-nothing outside the scope changes — no component needed editing and no raw hex
-entered the components (golden rule 5 in spirit). Accents keep their hue but
-darken: `--accent` lime `#d8ff3e` → `#5f7d00`, since it's used for text and
+**Themeable board, scoped (☾/☀ in the toolbar, light default).** `weave.css`
+re-points the SAME semantic tokens (`--bg`, `--panel`, `--fg`, `--border`,
+accents) at light values under `.weave-light`. Every component flips on its own,
+none of them know a theme exists, nothing outside the scope changes — no
+component needed editing and no raw hex entered them (golden rule 5 in spirit).
+**Dark needs no CSS at all**: the workspace's `:root` tokens already *are* the
+dark theme, so dark is simply the absence of the class. Light accents keep their
+hue but darken (`--accent` `#d8ff3e` → `#5f7d00`) — they're used for text and
 1.5px strokes, and the dark-theme lime is invisible on white.
+
+**⚠️ StrictMode ate a persisted setting.** Both toggles first wrote
+localStorage *inside* the `setState` updater. StrictMode double-invokes updaters
+to check purity, so the write ran twice and the second pass read back its own
+side effect and persisted the OPPOSITE of the click — UI went dark, storage said
+light, reload undid it. Side effects belong in the handler, not the updater.
+Only caught by toggling and reloading; the UI looked correct the whole time.
 
 **⚠️ Batching regression (found by watching glazy's real speech, not a test):**
 "I want an app for patenting. I want an app like Tinder for devs." returned ZERO
