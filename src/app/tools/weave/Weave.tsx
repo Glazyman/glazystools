@@ -1298,6 +1298,15 @@ function ExportMenu({ onExport }: { onExport: (kind: "md" | "json") => void }) {
   );
 }
 
+/** "3m" / "2h" / "5d" — enough to tell which board you were just in. */
+function ago(iso: string): string {
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return "now";
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
+  return `${Math.floor(secs / 86400)}d`;
+}
+
 function BoardMenu({
   boards,
   boardId,
@@ -1319,7 +1328,10 @@ function BoardMenu({
 }) {
   const { ref, close } = useMenu();
   return (
-    <div className="flex items-center gap-1">
+    // `relative` lives HERE, not on the <details>. Anchored to the chevron the
+    // menu hung off to its right, half-detached from the title it belongs to;
+    // anchored to the whole control it drops straight down under the name.
+    <div className="relative flex items-center gap-1">
       <input
         value={title}
         onChange={(e) => onTitle(e.target.value)}
@@ -1330,45 +1342,64 @@ function BoardMenu({
         placeholder="Untitled board"
         className="w-40 rounded-md bg-transparent px-2 py-1 text-sm font-medium outline-none transition-colors hover:bg-elevated focus:bg-elevated"
       />
-      <details ref={ref} className="relative">
+      <details ref={ref}>
         <summary className="cursor-pointer list-none rounded-md px-1.5 py-1 text-xs text-subtle transition-colors hover:bg-hover hover:text-fg">
           ⌄
         </summary>
-        <div className="absolute left-0 z-20 mt-1 w-60 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
-          <div className="max-h-64 overflow-y-auto">
-            {boards.map((b) => (
-              <div
-                key={b.id}
-                className={[
-                  "group flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-hover",
-                  b.id === boardId ? "text-accent" : "text-muted",
-                ].join(" ")}
-              >
-                <button
-                  onClick={() => {
-                    close();
-                    onOpen(b.id);
-                  }}
-                  className="min-w-0 flex-1 truncate text-left"
+        <div className="absolute left-0 top-full z-20 mt-1.5 w-72 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
+          <div className="border-b border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-subtle">
+            Boards
+          </div>
+          <div className="max-h-72 overflow-y-auto py-1">
+            {boards.map((b) => {
+              const current = b.id === boardId;
+              return (
+                <div
+                  key={b.id}
+                  className="group flex items-center gap-2 px-2 transition-colors"
                 >
-                  {b.title}
-                </button>
-                <button
-                  onClick={() => onDelete(b.id)}
-                  title="Delete board"
-                  className="opacity-0 transition-opacity hover:text-accent-2 group-hover:opacity-100"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+                  <button
+                    onClick={() => {
+                      close();
+                      onOpen(b.id);
+                    }}
+                    className={[
+                      "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                      current ? "bg-elevated" : "hover:bg-hover",
+                    ].join(" ")}
+                  >
+                    {/* A dot rather than coloured text: the current board still
+                        needs to be readable, not just tinted. */}
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{
+                        background: current ? "var(--accent)" : "transparent",
+                      }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-xs text-fg">
+                      {b.title}
+                    </span>
+                    <span className="shrink-0 font-mono text-[9px] text-subtle">
+                      {ago(b.updated_at)}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => onDelete(b.id)}
+                    title="Delete board"
+                    className="shrink-0 px-1 text-xs text-subtle opacity-0 transition-opacity hover:text-accent-2 group-hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
           </div>
           <button
             onClick={() => {
               close();
               onNew();
             }}
-            className="block w-full border-t border-border px-3 py-2 text-left text-xs text-accent hover:bg-hover"
+            className="block w-full border-t border-border px-3 py-2.5 text-left text-xs text-accent transition-colors hover:bg-hover"
           >
             + New board
           </button>
