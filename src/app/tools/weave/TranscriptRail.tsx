@@ -101,6 +101,17 @@ export function TranscriptRail({
       ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [highlight, utterances]);
 
+  // Clicking off a card (highlight clears after having been set) returns the
+  // rail to the live tail — where selecting the card had scrolled it away from.
+  const hadHighlight = useRef(false);
+  useEffect(() => {
+    const has = !!highlight?.size;
+    if (hadHighlight.current && !has) {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    hadHighlight.current = has;
+  }, [highlight]);
+
   return (
     <aside className="flex h-full w-[320px] shrink-0 flex-col border-r border-border bg-panel">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
