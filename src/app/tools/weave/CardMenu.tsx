@@ -17,6 +17,8 @@ export type CardMenuProps = {
    *  card is part of it, otherwise just this card. */
   selectionCount: number;
   onClose: () => void;
+  /** Multi-selection only: fold the selected cards into one. */
+  onMerge: () => void;
   onDuplicate: (id: string) => void;
   onSplit: (id: string) => void;
   onBuildPrompt: (id: string) => void;
@@ -33,6 +35,7 @@ export function CardMenu({
   state,
   selectionCount,
   onClose,
+  onMerge,
   onDuplicate,
   onSplit,
   onBuildPrompt,
@@ -86,6 +89,11 @@ export function CardMenu({
           ? `Build prompt from ${selectionCount} cards…`
           : "Build prompt from this card…"}
       </Item>
+      {selectionCount > 1 && (
+        <Item onClick={act(onMerge)}>
+          Merge {selectionCount} cards into one…
+        </Item>
+      )}
       {card.type === "prompt" && (
         <Item onClick={act(() => onDownloadMd(card.id))}>Download .md</Item>
       )}

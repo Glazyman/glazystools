@@ -9,6 +9,26 @@ obvious.
 
 ---
 
+## 2026-07-18 — Weave: merge selected cards into one
+
+Select 2+ cards → a small **selection panel docks on the left edge of the
+canvas** ("N cards selected") with *Merge into one card* and *Build prompt
+from these…*. Merge is also on the right-click menu when the clicked card is
+part of a multi-selection.
+
+- New route `/api/weave/merge`: the AI writes ONLY the text — one
+  type/title/body carrying every point the chosen cards made, invent nothing
+  (inverse of split; `WEAVE_MERGE_MODEL`, defaults gemini-2.5-flash).
+- The structural half is client-side and deterministic (`mergeCards` in
+  Weave.tsx): the **earliest-created card survives** (root of the thought,
+  keeps its transcript links), the rest are folded in. Edges re-point to the
+  survivor (self-loops dropped, A→B/B→A deduped), utterance `cardIds`,
+  question `cardId`, and other cards' `promptSources` follow; attachments,
+  `sourceUtteranceIds`, and the first chart move onto the survivor. Pin
+  carries over if any source was pinned.
+- Undo-able (one history push), spend banked, summary lands in the notice
+  banner; chosen cards pulse the "Thinking…" spinner while the model writes.
+
 ## 2026-07-17 — Weave: voice commands become a system (delete / expand / prompt)
 
 The map route's `remove` list grew into `command: {action, ids, reason}` with

@@ -28,6 +28,7 @@ import {
   type OpenQuestion,
   type Op,
   type PendingCommand,
+  type WeaveEdge,
 } from "@/lib/weave/types";
 import { Board, type BoardApi } from "./Board";
 import { CardMenu, type CardMenuState } from "./CardMenu";
@@ -116,6 +117,7 @@ export function Weave() {
   const [selection, setSelection] = useState<string[]>([]);
   const [mapping, setMapping] = useState(0);
   const [consolidating, setConsolidating] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** What the last review changed, plus the board as it was — the veto. */
@@ -1128,6 +1130,148 @@ export function Weave() {
   );
 
   /**
+   * Selected cards → one card. The AI only writes the TEXT (one title/body
+   * carrying everything the chosen cards said); which card survives and where
+   * the edges go is decided here, deterministically. The earliest-created card
+   * is the one that lives on — it's the root of the thought, and keeping its
+   * id keeps its transcript links meaningful.
+   */
+  const mergeCards = useCallback(
+    async (ids: string[]) => {
+      const boardAtCall = boardIdRef.current;
+      const chosen = docRef.current.cards.filter((c) => ids.includes(c.id));
+      if (chosen.length < 2 || merging) return;
+
+      setMerging(true);
+      // The expand spinner: every chosen card pulses "Thinking…" while the AI
+      // writes the combined text.
+      setExpanding((prev) => {
+        const n = new Set(prev);
+        chosen.forEach((c) => n.add(c.id));
+        return n;
+      });
+      try {
+        const res = await fetch("/api/weave/merge", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cards: chosen.map((c) => ({
+              id: c.id,
+              type: c.type,
+              title: c.title,
+              body: c.body,
+            })),
+          }),
+        });
+        const json = (await res.json()) as {
+          merged?: { type: string; title: string; body: string };
+          summary?: string;
+          cost?: number;
+          error?: string;
+        };
+        if (json.error) throw new Error(json.error);
+        addSpend(json.cost);
+        const merged = json.merged;
+        if (!merged?.title?.trim()) throw new Error("The merge came back empty.");
+        if (boardIdRef.current !== boardAtCall) return;
+
+        // Re-read the doc — cards can vanish while the model thinks.
+        const live = docRef.current.cards.filter((c) => ids.includes(c.id));
+        if (live.length < 2) return;
+        const anchor = live.reduce((a, b) => (b.createdAt < a.createdAt ? b : a));
+        const gone = new Set(
+          live.map((c) => c.id).filter((id) => id !== anchor.id),
+        );
+        const re = (id: string) => (gone.has(id) ? anchor.id : id);
+
+        const survivor: Card = {
+          ...anchor,
+          type: merged.type,
+          title: merged.title.trim(),
+          body: merged.body.trim(),
+          // Everything the sources owned moves onto the survivor: files,
+          // transcript lineage, the first chart among them.
+          chart: anchor.chart ?? live.find((c) => c.chart?.length)?.chart,
+          attachments: (() => {
+            const all = live.flatMap((c) => c.attachments ?? []);
+            return all.length ? all : undefined;
+          })(),
+          sourceUtteranceIds: [
+            ...new Set(live.flatMap((c) => c.sourceUtteranceIds)),
+          ],
+          // A pin guards hand-edited words from the mapper; merging folded
+          // those words in, so the guard carries over.
+          pinned: live.some((c) => c.pinned) || undefined,
+          promptSources: (() => {
+            const all = [
+              ...new Set(live.flatMap((c) => c.promptSources ?? []).map(re)),
+            ].filter((id) => id !== anchor.id);
+            return all.length ? all : undefined;
+          })(),
+        };
+
+        pushHistory();
+        updateDoc((d) => {
+          // Every edge that touched a merged card now touches the survivor —
+          // minus self-loops, and deduped treating A→B and B→A as one.
+          const seen = new Set<string>();
+          const edges: WeaveEdge[] = [];
+          for (const e of d.edges) {
+            const s = re(e.source);
+            const t = re(e.target);
+            if (s === t) continue;
+            const key = [s, t].sort().join("|");
+            if (seen.has(key)) continue;
+            seen.add(key);
+            edges.push(
+              s === e.source && t === e.target
+                ? e
+                : { ...e, id: `${s}->${t}`, source: s, target: t },
+            );
+          }
+          return {
+            ...d,
+            cards: d.cards
+              .filter((c) => !gone.has(c.id))
+              .map((c) => {
+                if (c.id === anchor.id) return survivor;
+                // Prompt lineage elsewhere on the board follows the merge too.
+                if (c.promptSources?.some((id) => gone.has(id))) {
+                  return {
+                    ...c,
+                    promptSources: [...new Set(c.promptSources.map(re))],
+                  };
+                }
+                return c;
+              }),
+            edges,
+            questions: d.questions.map((q) =>
+              q.cardId && gone.has(q.cardId) ? { ...q, cardId: anchor.id } : q,
+            ),
+            utterances: d.utterances.map((u) =>
+              u.cardIds.some((id) => gone.has(id))
+                ? { ...u, cardIds: [...new Set(u.cardIds.map(re))] }
+                : u,
+            ),
+          };
+        });
+        flashCards([anchor.id]);
+        setNotice(json.summary ?? `Merged ${live.length} cards.`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Merge failed.");
+      } finally {
+        setMerging(false);
+        setExpanding((prev) => {
+          const n = new Set(prev);
+          chosen.forEach((c) => n.delete(c.id));
+          return n;
+        });
+      }
+    },
+    [addSpend, flashCards, merging, pushHistory, updateDoc],
+  );
+
+  /**
    * The exit door: selected cards → one paste-ready build prompt, landed as a
    * pinned card (pinned so neither the mapper nor the review pass rewrites a
    * deliverable) and copied to the clipboard.
@@ -1834,6 +1978,29 @@ export function Weave() {
                 onCardContextMenu={(card, x, y) => setMenu({ card, x, y })}
                 onApi={handleApi}
               />
+              {/* Selection actions — docked on the left edge of the canvas
+                  whenever two or more cards are picked. Multi-card verbs live
+                  here; single-card ones stay on the right-click menu. */}
+              {selection.length >= 2 && (
+                <div className="absolute left-3 top-3 z-10 w-48 overflow-hidden rounded-[10px] border border-border bg-panel py-1 shadow-card">
+                  <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-subtle">
+                    {selection.length} cards selected
+                  </div>
+                  <button
+                    onClick={() => void mergeCards(selection)}
+                    disabled={merging}
+                    className="block w-full px-3 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {merging ? "Merging…" : "⇥ Merge into one card"}
+                  </button>
+                  <button
+                    onClick={() => void buildPrompt(selection[0])}
+                    className="block w-full px-3 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover"
+                  >
+                    ✦ Build prompt from these…
+                  </button>
+                </div>
+              )}
               {doc.cards.length === 0 && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="max-w-xs text-center">
@@ -1874,6 +2041,7 @@ export function Weave() {
           selectionCount={
             selection.includes(menu.card.id) ? selection.length : 1
           }
+          onMerge={() => void mergeCards(selection)}
           onDuplicate={duplicateCard}
           onSplit={splitCard}
           onBuildPrompt={buildPrompt}
