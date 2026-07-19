@@ -131,6 +131,14 @@ export function Weave() {
     summary: string;
     before: BoardDoc;
   } | null>(null);
+  /** A cleanup the review WANTS to make, waiting for your yes. The review no
+   *  longer edits on its own — it proposes, and this holds the proposal. */
+  const [pendingReview, setPendingReview] = useState<{
+    ops: Op[];
+    summary: string;
+    /** Cards it wants to split — remembered as "declined" if you say no. */
+    splitIds: string[];
+  } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   /** Spoken commands awaiting the hand that confirms them. Commands aimed at
    *  the SELECTION run straight away (deletes excepted — a misheard "delete
@@ -265,6 +273,10 @@ export function Weave() {
     setCanUndo(false);
     setCanRedo(false);
     setSaveState("saved");
+    // A staged review belongs to the board it was computed from — never carry
+    // a proposal (or a just-applied digest) across a board switch.
+    setPendingReview(null);
+    setReviewDigest(null);
   }, []);
 
   const pushHistory = useCallback(() => {
@@ -1219,6 +1231,9 @@ export function Weave() {
           // A pin guards hand-edited words from the mapper; merging folded
           // those words in, so the guard carries over.
           pinned: live.some((c) => c.pinned) || undefined,
+          // You just deliberately made these one card — the cleanup pass must
+          // not turn around and split it back apart.
+          noSplit: true,
           promptSources: (() => {
             const all = [
               ...new Set(live.flatMap((c) => c.promptSources ?? []).map(re)),
@@ -1515,10 +1530,17 @@ export function Weave() {
 
   // ── Board actions ───────────────────────────────────────────────────────
 
-  const consolidate = async () => {
+  /**
+   * Ask the cleanup pass what it would change — and stage it rather than doing
+   * it. The review no longer edits the board on its own: it hands back a
+   * proposal you Apply or Dismiss (`applyReview` / `dismissReview`). `silent`
+   * (the auto path) keeps quiet when there's nothing to propose; the manual
+   * button says so out loud.
+   */
+  const consolidate = async (silent = false) => {
     if (consolidating) return; // one review at a time — auto + click can race
     if (docRef.current.cards.length < 2) {
-      setNotice("Not enough on the board to consolidate yet.");
+      if (!silent) setNotice("Not enough on the board to consolidate yet.");
       return;
     }
     const boardAtCall = boardIdRef.current;
@@ -1535,13 +1557,16 @@ export function Weave() {
             title: c.title,
             body: c.body,
             pinned: c.pinned,
+            noSplit: c.noSplit,
           })),
           edges: d.edges.map((e) => ({ source: e.source, target: e.target })),
+          declinedSplitIds: d.declinedSplits ?? [],
         }),
       });
       const json = (await res.json()) as {
         ops?: Op[];
         summary?: string;
+        splitIds?: string[];
         cost?: number;
         error?: string;
       };
@@ -1552,28 +1577,53 @@ export function Weave() {
       if (boardIdRef.current !== boardAtCall) return;
       const ops = json.ops ?? [];
       if (ops.length) {
-        const before = docRef.current;
-        pushHistory();
-        const { doc: next, touched } = applyOps(before, ops);
-        docRef.current = next;
-        setDoc(next);
-        markDirty();
-        flashCards(touched);
-        // The digest, not a notice: the review edited the board on its own,
-        // so it owes you what it did — and a way to say no.
-        setReviewDigest({
-          summary: json.summary ?? "Board reviewed.",
-          before,
+        // Propose, don't apply. Nothing changes until you say yes.
+        setPendingReview({
+          ops,
+          summary: json.summary ?? "Tidy up the board?",
+          splitIds: json.splitIds ?? [],
         });
-      } else {
+      } else if (!silent) {
         setNotice(json.summary ?? "Nothing needed changing.");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Consolidate failed.");
+      if (!silent) setError(e instanceof Error ? e.message : "Consolidate failed.");
     } finally {
       setConsolidating(false);
     }
   };
+
+  /** Say yes to the staged review — apply its ops, and leave an Undo behind. */
+  const applyReview = useCallback(() => {
+    setPendingReview((review) => {
+      if (!review) return null;
+      const before = docRef.current;
+      pushHistory();
+      const { doc: next, touched } = applyOps(before, review.ops);
+      docRef.current = next;
+      setDoc(next);
+      markDirty();
+      flashCards(touched);
+      setReviewDigest({ summary: review.summary, before });
+      return null;
+    });
+  }, [flashCards, markDirty, pushHistory]);
+
+  /** Say no — and remember it. Any split it wanted is recorded as declined, so
+   *  the pass won't raise the same card again next time you stop talking. */
+  const dismissReview = useCallback(() => {
+    setPendingReview((review) => {
+      if (review?.splitIds.length) {
+        updateDoc((d) => ({
+          ...d,
+          declinedSplits: [
+            ...new Set([...(d.declinedSplits ?? []), ...review.splitIds]),
+          ],
+        }));
+      }
+      return null;
+    });
+  }, [updateDoc]);
 
   /** Executes a spoken command — directly for selection-aimed ones, or from
    *  the rail's confirm question for the rest. */
@@ -1711,7 +1761,8 @@ export function Weave() {
       // The target held through the trailing settles/maps; release it before
       // the review so the next session starts unaimed.
       focusCardRef.current = null;
-      void consolidateRef.current();
+      // Silent: the auto pass only speaks up when it has something to propose.
+      void consolidateRef.current(true);
     })();
   }, [speech.state]);
 
@@ -1899,11 +1950,11 @@ export function Weave() {
             Tidy
           </TB>
           <TB
-            onClick={consolidate}
+            onClick={() => consolidate()}
             disabled={consolidating || doc.cards.length < 2}
-            title="Merge duplicates, tighten titles, add missed links"
+            title="Review the board — merge duplicates, tighten titles, add missed links (asks before applying)"
           >
-            {consolidating ? "Consolidating…" : "✦ Consolidate"}
+            {consolidating ? "Reviewing…" : "✦ Review"}
           </TB>
 
           <ExportMenu onExport={exportAs} />
@@ -1955,9 +2006,28 @@ export function Weave() {
           {notice}
         </Banner>
       )}
+      {/* The review PROPOSES; it no longer edits on its own. Apply says yes,
+          Dismiss says no (and a declined split is remembered). */}
+      {pendingReview && (
+        <Banner tone="wip">
+          ✦ Review suggests: {pendingReview.summary}{" "}
+          <button
+            onClick={applyReview}
+            className="ml-2 rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-opacity hover:opacity-70"
+          >
+            Apply
+          </button>
+          <button
+            onClick={dismissReview}
+            className="ml-1.5 rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-opacity hover:opacity-70"
+          >
+            Dismiss
+          </button>
+        </Banner>
+      )}
       {reviewDigest && (
         <Banner tone="wip" onDismiss={() => setReviewDigest(null)}>
-          ✦ Review: {reviewDigest.summary}{" "}
+          ✦ Applied: {reviewDigest.summary}{" "}
           <button
             onClick={vetoReview}
             className="ml-2 rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-opacity hover:opacity-70"

@@ -78,6 +78,12 @@ export type Card = {
    * them AS THEY ARE NOW instead of freezing the deliverable on day one.
    */
   promptSources?: string[];
+  /**
+   * Set when the user deliberately combined several cards into this one (the
+   * Merge action). The cleanup pass must never split it back apart — pulling a
+   * just-merged card into pieces is the exact opposite of what was asked.
+   */
+  noSplit?: boolean;
 };
 
 export type WeaveEdge = {
@@ -144,6 +150,12 @@ export type BoardDoc = {
    * boards written before this existed still load.
    */
   spend?: number;
+  /**
+   * Card ids the user has already refused to let the cleanup pass split. Once
+   * you dismiss a proposed split, it stays dismissed — the review won't keep
+   * asking to break the same card apart every time you stop talking.
+   */
+  declinedSplits?: string[];
 };
 
 export type BoardMeta = {

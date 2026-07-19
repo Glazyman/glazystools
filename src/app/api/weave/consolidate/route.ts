@@ -106,6 +106,10 @@ list is a good outcome and often the correct one.
 Never touch a card marked pinned:true. The user wrote that text by hand. Do not
 update it, do not delete it, do not merge it away. You may still link to it.
 
+Never split a card marked noSplit:true. The user deliberately combined it out of
+several cards; breaking it back apart is the exact opposite of what they asked.
+You may still retitle, merge, or link it — just never split it.
+
 ## What you may fix
 
 Duplicates — two cards making genuinely the SAME point in different words. This
@@ -181,23 +185,37 @@ type Body = {
     title: string;
     body: string;
     pinned?: boolean;
+    /** The user combined this card by hand — it may never be split. */
+    noSplit?: boolean;
   }[];
   edges?: { source: string; target: string }[];
+  /** Cards the user already refused to split — don't propose them again. */
+  declinedSplitIds?: string[];
 };
 
 export async function POST(req: Request) {
   try {
-    const { cards = [], edges = [] } = (await req.json()) as Body;
+    const {
+      cards = [],
+      edges = [],
+      declinedSplitIds = [],
+    } = (await req.json()) as Body;
 
     // Nothing to merge against — the model would only be tempted to fiddle.
     if (cards.length < 2) {
       return Response.json({ ops: [], summary: "Nothing to clean up." });
     }
 
+    // Cards that must never be split: ones the user merged by hand, plus any
+    // split they've already dismissed. Enforced twice — once as a rule the
+    // model is told, once as a filter it can't get around.
+    const noSplit = new Set<string>(declinedSplitIds);
+    for (const c of cards) if (c.noSplit) noSplit.add(c.id);
+
     const board = cards
       .map(
         (c) =>
-          `- id:${c.id} [${c.type}${c.pinned ? " pinned:true" : ""}] "${c.title}" — ${c.body}`,
+          `- id:${c.id} [${c.type}${c.pinned ? " pinned:true" : ""}${c.noSplit ? " noSplit:true" : ""}] "${c.title}" — ${c.body}`,
       )
       .join("\n");
 
@@ -222,9 +240,21 @@ never touch pinned cards, and leaving the board alone is a perfectly good
 answer.`,
     });
 
+    // Hard backstop: drop any split the model proposed on a card that may not
+    // be split, whatever the prompt said. A merged card the user is being
+    // asked to un-merge is precisely the surprise this whole change removes.
+    object.split = object.split.filter((s) => !noSplit.has(s.id));
+
+    // Which cards this proposal still wants to split — so the client can
+    // remember a "no" and stop the pass re-asking about the same card.
+    const splitIds = object.split
+      .filter((s) => s.parts.some((p) => p.title.trim()) && s.keepTitle.trim())
+      .map((s) => s.id);
+
     return Response.json({
       ops: flatten(object),
       summary: object.summary,
+      splitIds,
       cost: await costOf(MODEL, usage),
     });
   } catch (err) {

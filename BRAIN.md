@@ -9,6 +9,33 @@ obvious.
 
 ---
 
+## 2026-07-19 — Weave: review asks before applying; merged cards never re-split
+
+Bug report: user merged two cards, then the auto-review (fires on mic-stop)
+split the merged card back apart and added a card. Three fixes:
+
+1. **Merged cards carry `noSplit: true`** (new Card field; set in `mergeCards`).
+   The consolidate route is told never to split noSplit cards AND filters any
+   split op targeting one as a hard backstop. A deliberately-merged card is
+   never proposed for splitting again.
+2. **The review proposes instead of applying.** `consolidate(silent?)` no
+   longer edits the board — it returns a proposal staged in `pendingReview`,
+   shown as a "✦ Review suggests: … [Apply] [Dismiss]" banner. Apply runs the
+   ops + leaves the old "✦ Applied: … [Undo]" digest; Dismiss drops them.
+   Auto path is silent (only speaks up when it has something); manual "✦ Review"
+   button (renamed from Consolidate) always surfaces the proposal.
+3. **A dismissed split is remembered.** Route returns `splitIds`; Dismiss adds
+   them to `doc.declinedSplits` (new BoardDoc field, persisted); the client
+   sends that list back as `declinedSplitIds` and the route drops those splits.
+   So "no" sticks — it won't re-ask to split the same card every mic-stop.
+
+Gotcha fixed along the way: the manual button was `onClick={consolidate}`,
+which would pass React's event as the `silent` arg → now `() => consolidate()`.
+
+Verified: curl — overloaded card splits normally, suppressed by both `noSplit`
+and `declinedSplitIds`. Browser — proposal banner renders with Apply/Dismiss,
+board untouched until you choose, Dismiss applies nothing.
+
 ## 2026-07-19 — Weave: sharper transcription (gpt-4o-transcribe + board vocab)
 
 Accuracy pass upgraded from `gpt-4o-mini-transcribe` → **`gpt-4o-transcribe`**
