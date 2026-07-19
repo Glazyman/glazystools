@@ -9,6 +9,33 @@ obvious.
 
 ---
 
+## 2026-07-19 — Weave: cards grow to fit text + richer export menu
+
+**Cards fit their text.** Dropped the `line-clamp-3` on the card body — the
+card node has auto height, so the whole body now shows and the card grows
+taller for longer text (was truncating with an ellipsis). Edit textareas
+auto-grow to their content too (title + body), so nothing scrolls out of
+sight while editing. Verified in-browser: a long body expands the card.
+
+**Export menu now matches the requested set:** Copy for Claude · Markdown
+outline · PNG image · SVG image · (divider) · JSON.
+- *Copy for Claude* → the structured markdown straight to the clipboard.
+- *Markdown outline* → the same markdown as a downloaded `.md`.
+- *PNG / SVG image* → the whole board, framed.
+- Route + menu: `ExportKind` union in export.ts; `exportAs` in Weave.tsx is
+  now async and routes each kind; `downloadDataUrl` saves image data URLs.
+
+**Image export is hand-rolled (`boardImage.ts`), NOT html-to-image.**
+html-to-image hangs indefinitely against this app's stylesheet — it tries to
+fetch/inline every web font and never resolves (confirmed: even `skipFonts`
+still wedged, only my 15s timeout surfaced it). So we draw the SVG ourselves
+from each card's real geometry: position from `inst.getNodes()`, size from the
+DOM node's `offsetWidth/Height` (the store's `measured` field isn't reliably
+populated), colours resolved from the live `--bg/--panel/--fg/...` tokens so
+light and dark both render, edges via `getBezierPath`, text wrapped with a
+canvas `measureText`. PNG rasterizes that SVG through an `Image`→`canvas` at
+2×. No network, no foreignObject, can't hang. Dependency removed again.
+
 ## 2026-07-18 — Weave: merge selected cards into one
 
 Select 2+ cards → a small **selection panel docks on the left edge of the

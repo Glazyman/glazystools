@@ -21,6 +21,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { removeCard } from "@/lib/weave/ops";
+import { boardToSvg, svgToDataUrl, type ImageNode } from "./boardImage";
 import type { BoardDoc } from "@/lib/weave/types";
 import { CardNode, type CardNodeType } from "./CardNode";
 
@@ -120,6 +121,12 @@ export type BoardProps = {
 export type BoardApi = {
   /** Flow coords at the middle of what you're currently looking at. */
   viewportCenter: () => { x: number; y: number };
+  /**
+   * The whole board rendered to an image data URL — every card framed, at the
+   * board's own size rather than whatever you happen to be zoomed to. `null`
+   * when there's nothing to draw or the canvas isn't live yet.
+   */
+  exportImage: (kind: "png" | "svg") => Promise<string | null>;
 };
 
 export function Board(props: BoardProps) {
@@ -374,6 +381,53 @@ function Canvas({
           x: r.left + r.width / 2,
           y: r.top + r.height / 2,
         });
+      },
+      exportImage: async (kind) => {
+        const inst = rf.current;
+        const root = wrapper.current;
+        if (!inst || !root) return null;
+        // Read nodes fresh — this handle is published once, but the board (and
+        // every card's height) keeps changing. Position comes from the flow;
+        // the rendered size comes from the DOM, which always has it even when
+        // the store's `measured` field hasn't been populated yet.
+        const imageNodes: ImageNode[] = [];
+        for (const n of inst.getNodes()) {
+          const dom = root.querySelector<HTMLElement>(
+            `.react-flow__node[data-id="${CSS.escape(n.id)}"]`,
+          );
+          const w = dom?.offsetWidth ?? n.measured?.width;
+          const h = dom?.offsetHeight ?? n.measured?.height;
+          if (!w || !h) continue;
+          imageNodes.push({ x: n.position.x, y: n.position.y, w, h, card: n.data.card });
+        }
+        if (!imageNodes.length) return null;
+
+        // Resolve the design tokens to real colours off the live board so the
+        // export matches whatever theme (light/dark) is showing.
+        const cs = getComputedStyle(root);
+        const tok = (name: string, fallback: string) =>
+          cs.getPropertyValue(name).trim() || fallback;
+        const resolveVar = (v: string) => {
+          const m = v.match(/var\((--[\w-]+)\)/);
+          return m ? tok(m[1], v) : v;
+        };
+        const pal = {
+          bg: tok("--bg", "#ffffff"),
+          panel: tok("--panel", "#ffffff"),
+          border: tok("--border", "#e5e5e5"),
+          fg: tok("--fg", "#111111"),
+          muted: tok("--muted", "#555555"),
+          subtle: tok("--subtle", "#999999"),
+          fontFamily: cs.fontFamily || "system-ui, sans-serif",
+          resolveVar,
+        };
+
+        const { svg, width, height } = boardToSvg(
+          imageNodes,
+          inst.getEdges().map((e) => ({ source: e.source, target: e.target })),
+          pal,
+        );
+        return svgToDataUrl(svg, width, height, kind);
       },
     });
   }, [onApi]);

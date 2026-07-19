@@ -202,9 +202,22 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
   );
   const editing = draft !== null;
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  // Grow a textarea to its content so nothing you type scrolls out of sight —
+  // the editor matches the card, which itself grows to fit.
+  const fit = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
 
   useEffect(() => {
-    if (editing) titleRef.current?.focus();
+    if (editing) {
+      titleRef.current?.focus();
+      fit(titleRef.current);
+      fit(bodyRef.current);
+    }
   }, [editing]);
 
   const commit = () => {
@@ -309,9 +322,10 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
             <textarea
               ref={titleRef}
               value={draft.title}
-              onChange={(e) =>
-                setDraft((d) => ({ ...d!, title: e.target.value }))
-              }
+              onChange={(e) => {
+                setDraft((d) => ({ ...d!, title: e.target.value }));
+                fit(e.target);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -320,20 +334,22 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
                 if (e.key === "Escape") setDraft(null);
                 e.stopPropagation();
               }}
-              rows={2}
-              className="w-full resize-none rounded-md bg-elevated px-2 py-1 text-sm font-medium leading-snug outline-none ring-1 ring-border-strong"
+              rows={1}
+              className="w-full resize-none overflow-hidden rounded-md bg-elevated px-2 py-1 text-sm font-medium leading-snug outline-none ring-1 ring-border-strong"
             />
             <textarea
+              ref={bodyRef}
               value={draft.body}
-              onChange={(e) =>
-                setDraft((d) => ({ ...d!, body: e.target.value }))
-              }
+              onChange={(e) => {
+                setDraft((d) => ({ ...d!, body: e.target.value }));
+                fit(e.target);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setDraft(null);
                 e.stopPropagation();
               }}
-              rows={3}
-              className="w-full resize-none rounded-md bg-elevated px-2 py-1 text-xs leading-relaxed text-muted outline-none ring-1 ring-border-strong"
+              rows={2}
+              className="w-full resize-none overflow-hidden rounded-md bg-elevated px-2 py-1 text-xs leading-relaxed text-muted outline-none ring-1 ring-border-strong"
             />
           </div>
         ) : (
@@ -345,9 +361,10 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
               <p
                 className={[
                   "mt-1 text-xs leading-relaxed text-muted",
-                  // A prompt card IS its body — clamping a deliverable to
-                  // three lines would hide the thing it exists to carry.
-                  card.type === "prompt" ? "whitespace-pre-wrap" : "line-clamp-3",
+                  // Show the whole body: the card grows to fit its text rather
+                  // than hiding it behind an ellipsis. pre-wrap keeps any line
+                  // breaks the text already has (prompt deliverables, lists).
+                  "whitespace-pre-wrap",
                 ].join(" ")}
               >
                 {card.body}

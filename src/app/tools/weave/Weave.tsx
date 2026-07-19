@@ -37,7 +37,13 @@ import { deleteAttachment, uploadAttachment } from "@/lib/weave/attachments";
 import { TranscriptRail } from "./TranscriptRail";
 import { BoardSearch, type SearchHit } from "./BoardSearch";
 import { useSpeech } from "./useSpeech";
-import { download, slugify, toMarkdown } from "./export";
+import {
+  download,
+  downloadDataUrl,
+  slugify,
+  toMarkdown,
+  type ExportKind,
+} from "./export";
 import "./weave.css";
 
 const LAST_BOARD = "weave:lastBoard";
@@ -1722,15 +1728,42 @@ export function Weave() {
     updateDoc(() => emptyDoc());
   };
 
-  const exportAs = (kind: "md" | "json") => {
+  const exportAs = async (kind: ExportKind) => {
     const name = slugify(title);
-    if (kind === "md") {
-      download(`${name}.md`, toMarkdown(title, doc), "text/markdown");
-    } else {
-      download(
-        `${name}.json`,
-        JSON.stringify({ title, ...doc }, null, 2),
-        "application/json",
+    try {
+      switch (kind) {
+        case "claude": {
+          // Straight to the clipboard, ready to paste into a chat — the same
+          // structured markdown the file export writes, minus the download.
+          await navigator.clipboard.writeText(toMarkdown(title, doc));
+          setNotice("Board copied — paste it into Claude.");
+          return;
+        }
+        case "md":
+          download(`${name}.md`, toMarkdown(title, doc), "text/markdown");
+          return;
+        case "json":
+          download(
+            `${name}.json`,
+            JSON.stringify({ title, ...doc }, null, 2),
+            "application/json",
+          );
+          return;
+        case "png":
+        case "svg": {
+          if (!doc.cards.length) {
+            setNotice("Nothing to export yet.");
+            return;
+          }
+          const url = await boardApi.current?.exportImage(kind);
+          if (!url) throw new Error("The board couldn't be rendered.");
+          downloadDataUrl(`${name}.${kind}`, url);
+          return;
+        }
+      }
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "That export didn't go through.",
       );
     }
   };
@@ -2231,32 +2264,43 @@ function SettingsMenu({
   );
 }
 
-function ExportMenu({ onExport }: { onExport: (kind: "md" | "json") => void }) {
+function ExportMenu({ onExport }: { onExport: (kind: ExportKind) => void }) {
   const { ref, close } = useMenu();
-  const pick = (kind: "md" | "json") => {
+  const pick = (kind: ExportKind) => {
     close();
-    onExport(kind);
+    void onExport(kind);
   };
   return (
     <details ref={ref} className="relative">
       <summary className="cursor-pointer list-none rounded-md border border-border px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg">
         Export
       </summary>
-      <div className="absolute right-0 z-20 mt-1 w-36 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
-        <button
-          onClick={() => pick("md")}
-          className="block w-full px-3 py-2 text-left text-xs text-muted hover:bg-hover hover:text-fg"
-        >
-          Markdown
-        </button>
-        <button
-          onClick={() => pick("json")}
-          className="block w-full px-3 py-2 text-left text-xs text-muted hover:bg-hover hover:text-fg"
-        >
-          JSON
-        </button>
+      <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
+        <ExportItem onClick={() => pick("claude")}>Copy for Claude</ExportItem>
+        <ExportItem onClick={() => pick("md")}>Markdown outline</ExportItem>
+        <ExportItem onClick={() => pick("png")}>PNG image</ExportItem>
+        <ExportItem onClick={() => pick("svg")}>SVG image</ExportItem>
+        <div className="my-1 border-t border-border" />
+        <ExportItem onClick={() => pick("json")}>JSON</ExportItem>
       </div>
     </details>
+  );
+}
+
+function ExportItem({
+  children,
+  onClick,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="block w-full px-3 py-2 text-left text-xs text-muted hover:bg-hover hover:text-fg"
+    >
+      {children}
+    </button>
   );
 }
 

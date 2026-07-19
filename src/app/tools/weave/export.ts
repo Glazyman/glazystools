@@ -48,6 +48,9 @@ export function toMarkdown(title: string, doc: BoardDoc): string {
   return out.join("\n");
 }
 
+/** Every way a board can leave the tool. */
+export type ExportKind = "claude" | "md" | "png" | "svg" | "json";
+
 export function download(filename: string, content: string, mime: string) {
   const url = URL.createObjectURL(new Blob([content], { type: mime }));
   const a = document.createElement("a");
@@ -55,6 +58,14 @@ export function download(filename: string, content: string, mime: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Save an already-encoded data: URL (an image from the canvas) to a file. */
+export function downloadDataUrl(filename: string, dataUrl: string) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  a.click();
 }
 
 export function slugify(s: string): string {
