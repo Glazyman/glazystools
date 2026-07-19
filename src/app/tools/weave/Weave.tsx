@@ -723,6 +723,17 @@ export function Weave() {
     },
     onError: setError,
     onCost: addSpend,
+    // Hand the accuracy pass the board's own words — card titles, and any
+    // custom type names the model coined — so it spells recurring jargon the
+    // way it already appears. Read from the ref so every pass sees the live
+    // board, not a snapshot from when listening began.
+    getHints: () => {
+      const cards = docRef.current.cards;
+      return [
+        ...cards.map((c) => c.title),
+        ...cards.map((c) => c.type),
+      ];
+    },
   });
 
   /** Re-say one transcript line: the next thing spoken replaces it, and its

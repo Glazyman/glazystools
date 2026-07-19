@@ -88,6 +88,13 @@ export type UseSpeechOptions = {
   onError?: (message: string) => void;
   /** USD the accuracy pass cost, once it's known. */
   onCost?: (usd: number) => void;
+  /**
+   * Words the accuracy pass should expect to hear — typically the board's
+   * current card titles. Read fresh at each pass and handed to the model as a
+   * vocabulary hint so it spells recurring names and jargon the way they
+   * already appear on the board. Called at settle time, not at setup.
+   */
+  getHints?: () => string[];
 };
 
 export type UseSpeechResult = {
@@ -232,6 +239,15 @@ export function useSpeech(opts: UseSpeechOptions): UseSpeechResult {
       try {
         const form = new FormData();
         form.append("audio", blob, `utterance.${extensionFor(mimeRef.current)}`);
+        // Steer the model toward the board's own vocabulary. Bounded and
+        // deduped so a big board can't send an unwieldy prompt.
+        const hints = optsRef.current.getHints?.() ?? [];
+        if (hints.length) {
+          const vocab = [...new Set(hints.map((h) => h.trim()).filter(Boolean))]
+            .slice(0, 60)
+            .join("\n");
+          if (vocab) form.append("hints", vocab);
+        }
         const res = await fetch("/api/weave/transcribe", {
           method: "POST",
           body: form,

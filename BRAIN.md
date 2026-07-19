@@ -9,6 +9,30 @@ obvious.
 
 ---
 
+## 2026-07-19 — Weave: sharper transcription (gpt-4o-transcribe + board vocab)
+
+Accuracy pass upgraded from `gpt-4o-mini-transcribe` → **`gpt-4o-transcribe`**
+(the full model; better on names, jargon, fast speech). One-line change via
+`WEAVE_TRANSCRIBE_MODEL`; still through the same gateway `transcription()` call,
+Gemini fallback unchanged.
+
+Also feeds the model a **vocabulary hint** — the board's own card titles + type
+names — so it spells recurring jargon the way it already appears. `useSpeech`
+gained `getHints?: () => string[]` (read from `docRef` at settle time, deduped,
+capped at 60); the client posts them as a `hints` form field; the route passes
+them via OpenAI's `providerOptions.openai.prompt` (and into the fallback chat
+prompt). No `language` pin — the speaker mixes languages.
+
+Note on "why not Deepgram / what does Claude use": Anthropic exposes NO STT
+model, so there's nothing Claude-branded to use. gpt-4o-transcribe (LLM-based,
+context-aware, promptable) is the best fit for short introspective clips;
+Deepgram's edge is latency/cost, not comprehension. Price ~2× the mini but
+pennies/hour on short clips.
+
+Verified: macOS `say` clip → route returned exact text; the hint visibly
+changed "trademark/patent" (no hint) → "trademark patent … cross-reference
+submitted ideas" (with hint). ~$0.00025 per ~4s clip.
+
 ## 2026-07-19 — Weave: cards grow to fit text + richer export menu
 
 **Cards fit their text.** Dropped the `line-clamp-3` on the card body — the

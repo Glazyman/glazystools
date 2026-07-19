@@ -17,7 +17,7 @@ import { costOf } from "@/lib/weave/cost";
 export const maxDuration = 60;
 
 const MODEL =
-  process.env.WEAVE_TRANSCRIBE_MODEL ?? "openai/gpt-4o-mini-transcribe";
+  process.env.WEAVE_TRANSCRIBE_MODEL ?? "openai/gpt-4o-transcribe";
 const FALLBACK_MODEL =
   process.env.WEAVE_TRANSCRIBE_FALLBACK_MODEL ?? "google/gemini-2.5-flash";
 
@@ -53,10 +53,23 @@ export async function POST(req: Request) {
 
     const data = new Uint8Array(await audio.arrayBuffer());
 
+    // Optional vocabulary hint: the board's own card titles, so the model
+    // spells recurring names and jargon the way they already appear. Bounded
+    // client-side; clamped again here so a crafted request can't send a novel.
+    const hintsRaw = form.get("hints");
+    const hints =
+      typeof hintsRaw === "string" ? hintsRaw.slice(0, 2000).trim() : "";
+
     try {
       const { text, providerMetadata } = await transcribe({
         model: gateway.transcription(MODEL),
         audio: data,
+        // OpenAI transcription's `prompt` biases spelling toward the terms it
+        // contains — the documented way to lock in names and jargon. No
+        // `language`: the speaker mixes languages, and pinning one hurts that.
+        ...(hints
+          ? { providerOptions: { openai: { prompt: hints } } }
+          : null),
       });
       return Response.json({
         text: text.trim(),
@@ -75,7 +88,12 @@ export async function POST(req: Request) {
         {
           role: "user",
           content: [
-            { type: "text", text: "Transcribe this audio." },
+            {
+              type: "text",
+              text: hints
+                ? `Transcribe this audio. These names and terms may appear — spell them this way if you hear them:\n${hints}`
+                : "Transcribe this audio.",
+            },
             {
               type: "file",
               // MediaRecorder's exact type carries the codec (e.g.
