@@ -21,6 +21,7 @@ import {
 import {
   CARD_TYPES,
   emptyDoc,
+  IMAGE_CARD_TYPE,
   type BoardDoc,
   type BoardMeta,
   type Card,
@@ -1024,6 +1025,97 @@ export function Weave() {
     [flashCards, pushHistory, updateDoc],
   );
 
+  /**
+   * Drop one or more pictures onto the board, each as its own image card.
+   * Shared by the "Picture…" menu item, the image picker, and clipboard paste —
+   * upload to Storage, then create a pinned image card per file at the middle
+   * of the view, fanned out so several pasted at once don't stack dead-on.
+   */
+  const addImageCards = useCallback(
+    async (files: File[]) => {
+      const imgs = files.filter((f) => f.type.startsWith("image/"));
+      if (!imgs.length) return;
+      const boardAtCall = boardIdRef.current;
+      if (!boardAtCall) {
+        setError("Open or create a board first.");
+        return;
+      }
+
+      setUploading((n) => n + 1);
+      try {
+        const uploaded = await Promise.all(
+          imgs.map((f) => uploadAttachment(boardAtCall, f)),
+        );
+        if (boardIdRef.current !== boardAtCall) return;
+
+        const center = boardApi.current?.viewportCenter() ?? { x: 0, y: 0 };
+        const created: string[] = [];
+        pushHistory();
+        updateDoc((d) => {
+          const cards = [...d.cards];
+          uploaded.forEach((att, i) => {
+            const at = freeSpotNear(
+              { ...d, cards },
+              {
+                x: center.x - CARD_W / 2 + i * 28,
+                y: center.y - CARD_H / 2 + i * 28,
+              },
+            );
+            const card: Card = {
+              id: crypto.randomUUID(),
+              type: IMAGE_CARD_TYPE,
+              title: "",
+              body: "",
+              x: at.x,
+              y: at.y,
+              createdAt: Date.now(),
+              sourceUtteranceIds: [],
+              // Yours the moment you drop it: the mapper leaves pinned cards
+              // alone, and the cleanup pass never splits a noSplit card.
+              pinned: true,
+              noSplit: true,
+              attachments: [att],
+            };
+            cards.push(card);
+            created.push(card.id);
+          });
+          return { ...d, cards };
+        });
+        flashCards(created);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't add that image.");
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    },
+    [flashCards, pushHistory, updateDoc],
+  );
+
+  /** The "Picture…" action: reuse a dedicated image-only picker. */
+  const imageInput = useRef<HTMLInputElement>(null);
+  const askForImage = useCallback(() => imageInput.current?.click(), []);
+
+  /**
+   * Paste a picture straight onto the board. Skipped while a text field has
+   * focus — pasting into a card's caption or the board title must still paste
+   * text, not spawn a card behind the editor.
+   */
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+        f.type.startsWith("image/"),
+      );
+      if (!files.length) return;
+      e.preventDefault();
+      void addImageCards(files);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [addImageCards]);
+
   /** No confirm — undo (⌘Z) is a better answer than a dialog on every card. */
   const deleteCard = useCallback(
     (id: string) => {
@@ -1905,9 +1997,7 @@ export function Weave() {
           <span className="font-mono text-[10px] text-accent">attaching…</span>
         )}
 
-        <TB onClick={addCard} title="Add a card by hand">
-          + Card
-        </TB>
+        <AddMenu onAddCard={addCard} onAddPicture={askForImage} />
 
         <div className="ml-auto flex items-center gap-1.5">
           {selection.length > 0 && (
@@ -2179,6 +2269,20 @@ export function Weave() {
           e.target.value = "";
         }}
       />
+
+      {/* Separate picker for "+ Picture" — image-only, and each file becomes its
+          own card rather than an attachment on an existing one. */}
+      <input
+        ref={imageInput}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          void addImageCards(Array.from(e.target.files ?? []));
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }
@@ -2340,6 +2444,45 @@ function SettingsMenu({
             Reset to Space
           </button>
         )}
+      </div>
+    </details>
+  );
+}
+
+/** The "+ Add" split: a blank card by hand, or a picture as its own card.
+ *  Same summary styling as a TB button so it sits flush in the toolbar. */
+function AddMenu({
+  onAddCard,
+  onAddPicture,
+}: {
+  onAddCard: () => void;
+  onAddPicture: () => void;
+}) {
+  const { ref, close } = useMenu();
+  const pick = (fn: () => void) => {
+    close();
+    fn();
+  };
+  return (
+    <details ref={ref} className="relative">
+      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-fg">
+        + Add
+        <svg
+          viewBox="0 0 12 12"
+          aria-hidden
+          className="chevron h-2.5 w-2.5 text-subtle"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M3 4.75 L6 7.75 L9 4.75" />
+        </svg>
+      </summary>
+      <div className="absolute left-0 z-20 mt-1 w-44 overflow-hidden rounded-[10px] border border-border bg-panel shadow-card">
+        <ExportItem onClick={() => pick(onAddCard)}>📝 Blank card</ExportItem>
+        <ExportItem onClick={() => pick(onAddPicture)}>🖼 Picture…</ExportItem>
       </div>
     </details>
   );

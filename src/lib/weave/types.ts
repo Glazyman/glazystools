@@ -86,6 +86,18 @@ export type Card = {
   noSplit?: boolean;
 };
 
+/**
+ * The marker type for an image card: a picture that IS the card, not a file
+ * pinned to a text card. The picture lives in `attachments[0]`; title/body are
+ * an optional caption. Born pinned + noSplit — you dropped it, so neither the
+ * mapper nor the cleanup pass gets to rewrite or dismember it.
+ */
+export const IMAGE_CARD_TYPE = "image";
+
+export function isImageCard(card: Card): boolean {
+  return card.type === IMAGE_CARD_TYPE && !!card.attachments?.length;
+}
+
 export type WeaveEdge = {
   id: string;
   source: string;

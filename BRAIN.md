@@ -9,6 +9,26 @@ obvious.
 
 ---
 
+## 2026-07-19 — Weave: image cards (add-as-picture + paste)
+
+- **Pictures are now first-class cards**, not just attachments on a text card.
+  An image card is a `Card` with `type: "image"` (see `IMAGE_CARD_TYPE` /
+  `isImageCard` in `types.ts`), the picture living in `attachments[0]` — so it
+  reuses the whole existing Storage upload / lightbox / delete pipeline.
+- **Add flow**: the `+ Card` toolbar button became a `+ Add` dropdown
+  (`AddMenu`, mirrors `ExportMenu`) → "Blank card" or "Picture…". Picture opens
+  an image-only `<input>`; each file becomes its own card at the viewport
+  centre, fanned out when several land at once.
+- **Paste**: a window `paste` listener drops clipboard images straight onto the
+  board as image cards. Skipped when a text field / contenteditable has focus,
+  so pasting into a caption or the board title still pastes text.
+- Image cards are born `pinned: true` + `noSplit: true` — the mapper leaves
+  them alone and the cleanup pass never dismembers them. Shared creation logic:
+  `addImageCards()` in `Weave.tsx` (used by menu, picker, and paste).
+- **Render** (`CardNode.tsx`): image cards show the picture edge-to-edge (click
+  → lightbox), no type label / chart / Expand; double-click still adds an
+  optional title/body caption.
+
 ## 2026-07-19 — Weave: review asks before applying; merged cards never re-split
 
 Bug report: user merged two cards, then the auto-review (fires on mic-stop)

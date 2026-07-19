@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
 import { CARD_W } from "@/lib/weave/layout";
 import type { Attachment, Card, CardType, ChartPoint } from "@/lib/weave/types";
+import { isImageCard } from "@/lib/weave/types";
 import { isImage } from "@/lib/weave/attachments";
 
 // Every type maps onto an existing palette token — no new colours enter the
@@ -230,12 +231,20 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
     }
   };
 
-  const color = typeColor(card.type);
+  const imageCard = isImageCard(card);
+  // An image card's colour is its picture, not a category — a neutral edge lets
+  // the photo carry the card so selection reads without a competing hue.
+  const color = imageCard ? "var(--border-strong)" : typeColor(card.type);
 
   return (
     <div
       style={{ width: CARD_W, ["--card" as string]: color }}
-      onDoubleClick={() => setDraft({ title: card.title, body: card.body })}
+      // An image card opens the picture full-size; a text card opens its editor.
+      onDoubleClick={() =>
+        imageCard
+          ? onOpenFile(card.id, 0)
+          : setDraft({ title: card.title, body: card.body })
+      }
       className={[
         // weave-card is the hook the neon dark theme hangs its per-type glow
         // off — it reads the --card var set just above.
@@ -287,26 +296,45 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
         }}
       />
 
-      {/* Symmetric padding now that the type stripe is gone. */}
-      <div className="px-4 py-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <button
-            onClick={() => onCycleType(card.id)}
-            title="Click to change type"
-            className="nodrag cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] transition-opacity hover:opacity-70"
-            style={{ color }}
+      {/* Symmetric padding now that the type stripe is gone. Image cards get a
+          thin frame so the picture reaches almost edge-to-edge. */}
+      <div className={imageCard ? "space-y-2 p-2" : "px-4 py-3"}>
+        {imageCard ? (
+          // The picture IS the card — and the card drags from anywhere,
+          // including the image, so NO `nodrag` here and no click handler to
+          // swallow the drag. Double-click (on the card) opens it full-size.
+          <div
+            title={card.attachments![0].name}
+            className="overflow-hidden rounded-[calc(var(--radius)-6px)] border border-border"
           >
-            {card.type}
-          </button>
-          {card.pinned && (
-            <span
-              title="You edited this — the AI won't rewrite it"
-              className="font-mono text-[9px] uppercase tracking-wider text-subtle"
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={card.attachments![0].url}
+              alt={card.title || card.attachments![0].name}
+              className="pointer-events-none block max-h-[300px] w-full object-cover"
+              draggable={false}
+            />
+          </div>
+        ) : (
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <button
+              onClick={() => onCycleType(card.id)}
+              title="Click to change type"
+              className="nodrag cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] transition-opacity hover:opacity-70"
+              style={{ color }}
             >
-              pinned
-            </span>
-          )}
-        </div>
+              {card.type}
+            </button>
+            {card.pinned && (
+              <span
+                title="You edited this — the AI won't rewrite it"
+                className="font-mono text-[9px] uppercase tracking-wider text-subtle"
+              >
+                pinned
+              </span>
+            )}
+          </div>
+        )}
 
         {draft ? (
           // onBlur bubbles (it's focusout), so this commits when focus leaves
@@ -352,6 +380,23 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
               className="w-full resize-none overflow-hidden rounded-md bg-elevated px-2 py-1 text-xs leading-relaxed text-muted outline-none ring-1 ring-border-strong"
             />
           </div>
+        ) : imageCard ? (
+          // Caption only, and only if you added one — an image card with no
+          // words is just the picture. Double-click still opens the editor.
+          (card.title || card.body) && (
+            <>
+              {card.title && (
+                <h3 className="text-sm font-medium leading-snug text-fg">
+                  {card.title}
+                </h3>
+              )}
+              {card.body && (
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted">
+                  {card.body}
+                </p>
+              )}
+            </>
+          )
         ) : (
           <>
             <h3 className="text-sm font-medium leading-snug text-fg">
@@ -382,6 +427,9 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
           </>
         )}
 
+        {/* Image cards skip the Expand affordance — "suggest next steps" reads
+            a card's words, and a picture has none to reason from. */}
+        {!imageCard && (
         <div className="mt-3 flex items-center gap-2">
           {/* Suggest next cards off this one. Reveal on hover — a deliberate
               act, not something to fire by accident while dragging. */}
@@ -410,6 +458,7 @@ export function CardNode({ data, selected }: NodeProps<CardNodeType>) {
             </span>
           )}
         </div>
+        )}
       </div>
     </div>
   );
